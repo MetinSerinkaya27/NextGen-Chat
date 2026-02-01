@@ -1,3 +1,5 @@
+
+```markdown
 # 🛡️ NextGen Chat - Uçtan Uca Şifreli Mesajlaşma (v0.1)
 
 > **"Güvenlik bir seçenek değil, standarttır."**
@@ -64,15 +66,77 @@ Projeyi yerel ortamınızda çalıştırmak için aşağıdaki adımları izleyi
 - PostgreSQL
 
 ### 1. Projeyi Klonlayın
+
 ```bash
 git clone [https://github.com/metinserinkayya/NextGen-Chat.git](https://github.com/metinserinkayya/NextGen-Chat.git)
 cd NextGen-Chat
-2. Backend Kurulumu (API)Veritabanını oluşturmak ve sunucuyu ayağa kaldırmak için:Bashcd ChatApp.Api
+
+```
+
+### 2. Backend Kurulumu (API)
+
+Veritabanını oluşturmak ve sunucuyu ayağa kaldırmak için:
+
+```bash
+cd ChatApp.Api
 # appsettings.json dosyasındaki ConnectionString ayarını kendi PostgreSQL şifrenize göre düzenleyin.
 dotnet restore
 dotnet ef database update
 dotnet run
-API şu adreste çalışacak: http://localhost:51243. Frontend Kurulumu (Arayüz)Yeni bir terminal açın ve client klasörüne gidin:Bashcd chatapp-client
+
+```
+
+*API şu adreste çalışacak:* `http://localhost:5124`
+
+### 3. Frontend Kurulumu (Arayüz)
+
+Yeni bir terminal açın ve client klasörüne gidin:
+
+```bash
+cd chatapp-client
 npm install
 npm run dev
-Uygulama şu adreste çalışacak: http://localhost:5173📸 Ekran GörüntüleriModern Giriş EkranıŞifreli Veritabanı YapısıSplit Screen Tasarım, Framer Motion AnimasyonlarıRSA Public Key Saklama Mantığı🗺️ Geliştirme Durumu[x] .NET 8 ve React Kurulumu[x] PostgreSQL Veritabanı Bağlantısı[x] Modern UI Tasarımı (Tailwind & Framer Motion)[x] RSA Anahtar Çifti Üretimi (Client-Side)[x] Kullanıcı Kayıt İşlemleri (Public Key Transferi)[ ] Giriş Yapma (Login) ve JWT Entegrasyonu[ ] Anlık Mesajlaşma (SignalR)[ ] Yapay Zeka Modüllerinin Entegrasyonu ⏳Geliştirici: Metin Serinkaya
+
+```
+
+*Uygulama şu adreste çalışacak:* `http://localhost:5173`
+
+---
+
+## 📸 Ekran Görüntüleri
+
+| Modern Giriş Ekranı | Şifreli Veritabanı Yapısı |
+| --- | --- |
+| *Split Screen Tasarım, Framer Motion Animasyonları* | *RSA Public Key Saklama Mantığı* |
+
+---
+
+## 🗺️ Geliştirme Durumu
+
+* [x] .NET 8 ve React Kurulumu
+* [x] PostgreSQL Veritabanı Bağlantısı
+* [x] Modern UI Tasarımı (Tailwind & Framer Motion)
+* [x] RSA Anahtar Çifti Üretimi (Client-Side)
+* [x] Kullanıcı Kayıt İşlemleri (Public Key Transferi)
+* [ ] Giriş Yapma (Login) ve JWT Entegrasyonu
+* [ ] Anlık Mesajlaşma (SignalR)
+* [ ] **Yapay Zeka Modüllerinin Entegrasyonu** ⏳
+
+---
+
+**Geliştirici:** [Metin Serinkaya](https://www.google.com/search?q=https://github.com/27MetinSerinkaya)
+
+```
+
+### Düzeltmeyi GitHub'a Göndermek İçin:
+
+Dosyayı kaydedip kapattıktan sonra terminale şu komutları yapıştır:
+
+```bash
+git add README.md
+git commit -m "Fix: README formatlama hatasi duzeltildi"
+git push
+
+```
+
+😎
