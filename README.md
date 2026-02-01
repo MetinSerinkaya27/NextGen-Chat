@@ -128,15 +128,6 @@ npm run dev
 
 ```
 
-### Düzeltmeyi GitHub'a Göndermek İçin:
 
-Dosyayı kaydedip kapattıktan sonra terminale şu komutları yapıştır:
-
-```bash
-git add README.md
-git commit -m "Fix: README formatlama hatasi duzeltildi"
-git push
-
-```
 
 😎
