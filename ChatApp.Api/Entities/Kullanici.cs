@@ -9,4 +9,5 @@ public class Kullanici
     public string PublicKey { get; set; } = string.Empty; // (PublicKey)
     
     public DateTime KayitTarihi { get; set; } = DateTime.UtcNow;
+    public DateTime? SonGorulme { get; set; }
 }
