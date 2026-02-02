@@ -1,160 +1,266 @@
 import { useEffect, useState, useRef } from 'react';
-import * as signalR from '@microsoft/signalr'; // SignalR kütüphanesini içeri aldık
-import { motion } from 'framer-motion'; // Animasyonlar için
+import * as signalR from '@microsoft/signalr';
+import axios from 'axios';
+import { motion } from 'framer-motion';
+// Kripto fonksiyonlarımızı çağırıyoruz (Yolun doğru olduğundan emin ol)
+import { importPrivateKey, importPublicKey, encryptMessage, decryptMessage } from '../utils/crypto';
 
-// Bu bileşenin alacağı özellikler (Props)
 interface ChatProps {
-  currentUser: string; // Kim giriş yaptı?
-  onLogout: () => void; // Çıkış yapınca ne olsun?
+  currentUser: string;
+  onLogout: () => void;
 }
 
-// Bir mesajın yapısı nasıldır?
 interface Message {
-  user: string; // Mesajı kim attı?
-  text: string; // Ne yazdı?
+  user: string;
+  text: string;
+}
+
+// Veritabanından gelen kullanıcı yapısı
+interface UserFromDB {
+  kullaniciAdi: string;
 }
 
 export default function Chat({ currentUser, onLogout }: ChatProps) {
+  // --- STATE'LER ---
+  const [connection, setConnection] = useState<signalR.HubConnection | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [inputText, setInputText] = useState('');
   
-  // --- DEĞİŞKENLER (STATE) ---
-  const [connection, setConnection] = useState<signalR.HubConnection | null>(null); // Bağlantı nesnesi
-  const [messages, setMessages] = useState<Message[]>([]); // Mesajların tutulduğu liste
-  const [inputText, setInputText] = useState(''); // O an yazılan yazı
-  
-  // Mesaj gelince otomatik en alta kaydırmak için referans
-  const messagesEndRef = useRef<HTMLDivElement| null>(null);
+  // Rehber (Tüm kullanıcılar) ve Online Durumu
+  const [allUsers, setAllUsers] = useState<UserFromDB[]>([]);
+  const [onlineUsers, setOnlineUsers] = useState<string[]>([]);
+  const [selectedUser, setSelectedUser] = useState<string | null>(null);
 
-  // --- 1. BAĞLANTIYI KURMA (Sayfa İlk Açıldığında) ---
+  // Kendi Gizli Anahtarımız (Matematiksel obje)
+  const [myPrivateKeyObj, setMyPrivateKeyObj] = useState<CryptoKey | null>(null);
+
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+
+  // --- 1. BAŞLANGIÇ: Anahtarı Yükle ve Rehberi Çek ---
   useEffect(() => {
-    // Yeni bir bağlantı inşa ediyoruz
+    // A. Kendi Gizli Anahtarımızı Hafızaya Al
+    const loadKeys = async () => {
+      const storedKey = localStorage.getItem('myPrivateKey');
+      if (storedKey) {
+        try {
+          const keyObj = await importPrivateKey(storedKey);
+          setMyPrivateKeyObj(keyObj);
+          console.log("🔐 Gizli anahtar başarıyla yüklendi.");
+        } catch (e) {
+          console.error("Anahtar yükleme hatası:", e);
+        }
+      }
+    };
+    loadKeys();
+
+    // B. Veritabanından Diğer Kullanıcıları Çek (REHBER)
+    const kullanicilariGetir = async () => {
+      try {
+        // DİKKAT: Backend "KullaniciController" olduğu için adres "/api/kullanici"
+        const res = await axios.get(`http://localhost:5124/api/kullanici?haricTutulan=${currentUser}`);
+        setAllUsers(res.data);
+      } catch (err) {
+        console.error("❌ Kullanıcı listesi çekilemedi (404 alıyorsan Backend'i kontrol et):", err);
+      }
+    };
+    kullanicilariGetir();
+  }, [currentUser]);
+
+  // --- 2. SIGNALR BAĞLANTISINI KUR ---
+  useEffect(() => {
     const newConnection = new signalR.HubConnectionBuilder()
-      .withUrl("http://localhost:5124/chathub") // Backend'deki kapı adresi
-      .withAutomaticReconnect() // Bağlantı koparsa (internet giderse) tekrar dene
+      .withUrl(`http://localhost:5124/chathub?username=${currentUser}`) // Hub adresi
+      .withAutomaticReconnect()
       .build();
 
-    // Bağlantıyı state'e kaydet
     setConnection(newConnection);
-  }, []);
+  }, [currentUser]);
 
-  // --- 2. SİNYALLERİ DİNLEME VE BAŞLATMA ---
+  // --- 3. SIGNALR DİNLEME MODU ---
   useEffect(() => {
-    if (connection) {
+    if (connection && myPrivateKeyObj) { // Anahtar ve Bağlantı hazırsa başla
       connection.start()
         .then(() => {
-          console.log("✅ Sunucuyla bağlantı kuruldu!");
+          console.log("✅ Socket Bağlantısı Kuruldu!");
 
-          // DİNLEME MODU: Backend bize "MesajAl" derse ne yapalım?
-          connection.on("MesajAl", (user: string, text: string) => {
-            // Gelen yeni mesajı, eski listeye ekle
-            setMessages(eskiMesajlar => [...eskiMesajlar, { user, text }]);
+          // A. Mesaj Geldiğinde
+          connection.on("MesajAl", async (gonderen: string, sifreliMesaj: string) => {
+            // Sadece başkasından gelen mesajları çözüyoruz
+            if (gonderen !== currentUser) {
+              try {
+                // Şifreyi Çöz 🔓
+                const acikMesaj = await decryptMessage(sifreliMesaj, myPrivateKeyObj);
+                setMessages(prev => [...prev, { user: gonderen, text: acikMesaj }]);
+              } catch (err) {
+                console.error("Şifre çözme hatası:", err);
+                setMessages(prev => [...prev, { user: gonderen, text: "🔒 Mesaj Çözülemedi" }]);
+              }
+            }
+          });
+
+          // B. Online Listesi Güncellemesi
+          connection.on("KullaniciListesi", (users: string[]) => {
+            setOnlineUsers(users);
           });
         })
-        .catch(hata => console.error("❌ Bağlantı hatası:", hata));
+        .catch(err => console.error("Socket Bağlantı Hatası:", err));
     }
-  }, [connection]);
+  }, [connection, myPrivateKeyObj]);
 
-  // --- 3. OTOMATİK KAYDIRMA ---
-  // Her yeni mesaj geldiğinde (messages değişince) ekranı en alta kaydır
+  // --- 4. EKRAN KAYDIRMA ---
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // --- 4. MESAJ GÖNDERME FONKSİYONU ---
+  // --- 5. MESAJ GÖNDERME (ŞİFRELEME) ---
   const sendMessage = async () => {
-    // Eğer bağlantı varsa ve yazı kutusu boş değilse
-    if (connection && inputText.trim()) {
+    if (connection && inputText.trim() && selectedUser) {
       try {
-        // KONUŞMA MODU: Backend'deki "MesajGonder" fonksiyonunu çalıştır
-        await connection.invoke("MesajGonder", currentUser, inputText);
+        // A. Karşı tarafın Public Key'ini al
+        const response = await axios.get(`http://localhost:5124/api/kullanici/publickey/${selectedUser}`);
+        const targetPublicKeyString = response.data.publicKey;
         
-        // Kutuyu temizle
+        // B. String anahtarı objeye çevir
+        const targetKeyObj = await importPublicKey(targetPublicKeyString);
+
+        // C. Mesajı KİLİTLE 🔒
+        const encryptedText = await encryptMessage(inputText, targetKeyObj);
+        
+        console.log(`📤 Gönderiliyor (${selectedUser}):`, inputText);
+        console.log(`🔐 Şifreli Veri:`, encryptedText);
+
+        // D. Sunucuya gönder
+        await connection.invoke("OzelMesajGonder", selectedUser, encryptedText);
+
+        // E. Ekranımıza kendi yazdığımızı ekle
+        setMessages(prev => [...prev, { user: currentUser, text: inputText }]);
+        
         setInputText('');
       } catch (e) {
-        console.error("Mesaj gitmedi:", e);
+        console.error("Mesaj gönderme hatası:", e);
+        alert("Mesaj gönderilemedi! Kullanıcı bulunamadı veya anahtar hatası.");
       }
+    } else if (!selectedUser) {
+      alert("Lütfen sol taraftan bir kişi seçin!");
     }
   };
 
-  // --- 5. EKRAN TASARIMI (UI) ---
   return (
-    <div className="flex flex-col h-screen bg-gray-100 font-sans">
+    <div className="flex h-screen bg-gray-100 font-sans overflow-hidden">
       
-      {/* ÜST BAR (HEADER) */}
-      <div className="bg-white shadow-sm p-4 flex justify-between items-center border-b border-gray-200">
-        <div className="flex items-center gap-2">
-          <div className="w-3 h-3 bg-emerald-500 rounded-full animate-pulse"></div>
-          <h1 className="text-xl font-bold text-gray-800">NextGen Chat 💬</h1>
+      {/* --- SOL TARA: REHBER --- */}
+      <div className="w-1/3 bg-white border-r border-gray-200 flex flex-col">
+        <div className="p-4 border-b border-gray-100 bg-gray-50">
+          <h2 className="text-lg font-bold text-gray-700">Kişiler 👥</h2>
+          <div className="text-xs text-gray-400 mt-1">Ben: {currentUser}</div>
         </div>
-        <div className="flex items-center gap-4">
-          <span className="bg-emerald-100 text-emerald-700 px-4 py-1 rounded-full text-sm font-bold">
-            👤 {currentUser}
-          </span>
-          <button onClick={onLogout} className="text-red-500 font-medium text-sm hover:text-red-700 hover:bg-red-50 px-3 py-1 rounded transition-colors">
+        
+        <div className="flex-1 overflow-y-auto">
+          {allUsers.length === 0 ? (
+            <div className="p-4 text-gray-400 text-sm text-center">
+              Rehber boş veya yükleniyor...<br/>(Veritabanında başka kullanıcı var mı?)
+            </div>
+          ) : (
+            allUsers.map(u => {
+              const isOnline = onlineUsers.includes(u.kullaniciAdi);
+              return (
+                <div 
+                  key={u.kullaniciAdi}
+                  onClick={() => setSelectedUser(u.kullaniciAdi)}
+                  className={`p-4 cursor-pointer flex items-center gap-3 border-b border-gray-50 transition-colors
+                    ${selectedUser === u.kullaniciAdi ? 'bg-emerald-50 border-l-4 border-l-emerald-500' : 'hover:bg-gray-50'}`}
+                >
+                  <div className="relative">
+                    <div className="w-10 h-10 bg-gray-200 rounded-full flex items-center justify-center text-gray-600 font-bold">
+                      {u.kullaniciAdi.charAt(0).toUpperCase()}
+                    </div>
+                    {/* Online Işığı */}
+                    <div className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white 
+                      ${isOnline ? 'bg-green-500' : 'bg-gray-300'}`}></div>
+                  </div>
+                  <div>
+                    <div className="font-medium text-gray-800">{u.kullaniciAdi}</div>
+                    <div className="text-xs text-gray-400">{isOnline ? 'Çevrimiçi' : 'Çevrimdışı'}</div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+        
+        <div className="p-4 border-t">
+          <button onClick={onLogout} className="w-full text-red-500 border border-red-100 py-2 rounded hover:bg-red-50 text-sm font-medium">
             Çıkış Yap
           </button>
         </div>
       </div>
 
-      {/* MESAJ ALANI (ORTA KISIM) */}
-      <div className="flex-1 p-4 overflow-y-auto space-y-4 bg-[#e5ddd5]"> {/* WhatsApp arka plan rengine benzer */}
-        
-        {messages.map((msg, index) => {
-          // Bu mesajı ben mi attım? (Kontrolü)
-          const isMe = msg.user === currentUser;
-          
-          return (
-            <motion.div 
-              key={index}
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}
-            >
-              {/* Baloncuk Tasarımı */}
-              <div className={`max-w-[70%] px-4 py-2 rounded-2xl shadow-md relative
-                ${isMe 
-                  ? 'bg-emerald-600 text-white rounded-tr-none' // Benim mesajım (Yeşil)
-                  : 'bg-white text-gray-800 rounded-tl-none'} // Başkasının mesajı (Beyaz)
-              `}>
-                {/* Eğer mesaj başkasınınsa ismini ufakça göster */}
-                {!isMe && <div className="text-xs text-orange-600 font-bold mb-1">{msg.user}</div>}
-                
-                <p className="text-md">{msg.text}</p>
-                
-                {/* Saat (Temsili) */}
-                <span className={`text-[10px] block text-right mt-1 opacity-70 ${isMe ? 'text-emerald-100' : 'text-gray-400'}`}>
-                  {new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+      {/* --- SAĞ TARA: SOHBET PENCERESİ --- */}
+      <div className="w-2/3 flex flex-col bg-[#e5ddd5]">
+        {/* Başlık */}
+        <div className="p-4 bg-white shadow-sm flex items-center gap-3 z-10">
+          {selectedUser ? (
+            <>
+              <div className="w-8 h-8 bg-emerald-100 text-emerald-700 rounded-full flex items-center justify-center font-bold">
+                {selectedUser.charAt(0)}
+              </div>
+              <div className="flex flex-col">
+                <span className="font-bold text-gray-800">{selectedUser}</span>
+                <span className="text-[10px] text-emerald-600 font-medium bg-emerald-50 px-2 rounded-full w-fit">
+                  🔒 Uçtan Uca Şifreli
                 </span>
               </div>
-            </motion.div>
-          );
-        })}
-        {/* Otomatik kaydırma için görünmez nokta */}
-        <div ref={messagesEndRef} />
-      </div>
+            </>
+          ) : (
+            <span className="text-gray-400 italic">Mesajlaşmak için bir kişi seçin...</span>
+          )}
+        </div>
 
-      {/* YAZMA ALANI (ALT KISIM) */}
-      <div className="p-4 bg-gray-50 border-t border-gray-200">
-        <div className="flex gap-3 max-w-5xl mx-auto items-center">
-          <input 
-            type="text" 
-            value={inputText}
-            onChange={e => setInputText(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && sendMessage()} // Enter'a basınca gönder
-            placeholder="Bir mesaj yazın..."
-            className="flex-1 border border-gray-300 rounded-full px-5 py-3 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 transition-all shadow-sm"
-          />
-          <button 
-            onClick={sendMessage}
-            className="bg-emerald-600 text-white w-12 h-12 rounded-full flex items-center justify-center hover:bg-emerald-700 shadow-lg transform active:scale-95 transition-all"
-          >
-            {/* Gönder İkonu (SVG) */}
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-6 h-6 ml-1">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
-            </svg>
-          </button>
+        {/* Mesajlar */}
+        <div className="flex-1 p-4 overflow-y-auto space-y-2">
+          {messages.map((msg, index) => {
+            const isMe = msg.user === currentUser;
+            return (
+               <motion.div 
+                 key={index}
+                 initial={{ opacity: 0, y: 5 }}
+                 animate={{ opacity: 1, y: 0 }}
+                 className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}
+               >
+                 <div className={`max-w-[70%] px-4 py-2 rounded-xl shadow-sm text-sm relative
+                   ${isMe ? 'bg-emerald-600 text-white rounded-tr-none' : 'bg-white text-gray-800 rounded-tl-none'}
+                 `}>
+                   {!isMe && <div className="text-[10px] text-orange-600 font-bold mb-1">{msg.user}</div>}
+                   <p>{msg.text}</p>
+                 </div>
+               </motion.div>
+            );
+          })}
+          <div ref={messagesEndRef} />
+        </div>
+
+        {/* Yazma Alanı */}
+        <div className="p-3 bg-gray-100">
+          <div className="flex gap-2 max-w-4xl mx-auto">
+            <input 
+              type="text" 
+              value={inputText}
+              onChange={e => setInputText(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && sendMessage()}
+              disabled={!selectedUser}
+              placeholder={selectedUser ? "Şifreli mesaj yaz..." : "Kişi seçiniz 👈"}
+              className="flex-1 border border-gray-300 rounded-full px-4 py-2 outline-none focus:border-emerald-500 disabled:bg-gray-200 transition-colors"
+            />
+            <button 
+              onClick={sendMessage} 
+              disabled={!selectedUser} 
+              className="bg-emerald-600 text-white w-10 h-10 rounded-full hover:bg-emerald-700 disabled:bg-gray-400 shadow-md flex items-center justify-center transition-all active:scale-95"
+            >
+              ➤
+            </button>
+          </div>
         </div>
       </div>
-
     </div>
   );
 }
