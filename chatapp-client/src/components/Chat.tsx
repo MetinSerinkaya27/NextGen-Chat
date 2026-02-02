@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import EmojiPicker from 'emoji-picker-react'; 
 import { importPrivateKey, importPublicKey, encryptMessage, decryptMessage } from '../utils/crypto';
 
+// --- TİPLER ---
 interface ChatProps {
   currentUser: string;
   onLogout: () => void;
@@ -37,11 +38,6 @@ export default function Chat({ currentUser, onLogout }: ChatProps) {
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showAttachMenu, setShowAttachMenu] = useState(false);
 
-  // MİKROFON STATES (YENİ)
-  const [isRecording, setIsRecording] = useState(false);
-  const [recordingTime, setRecordingTime] = useState(0);
-  const timerRef = useRef<any>(null);
-
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
   // --- MANTIK ---
@@ -51,48 +47,14 @@ export default function Chat({ currentUser, onLogout }: ChatProps) {
     const now = new Date();
     const diffInSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);
 
-    if (diffInSeconds < 60) return "Şimdi";
+    if (diffInSeconds < 60) return "Çevrimiçi";
     if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)}dk önce`;
-    return date.toLocaleDateString('tr-TR');
+    if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)}sa önce`;
+    return date.toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' });
   };
 
   const getCurrentTime = () => new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
-  const generateId = () => Math.random().toString(36).substr(2, 9);
-
-  // --- SES KAYIT MANTIKLARI ---
-  const startRecording = () => {
-    setIsRecording(true);
-    setRecordingTime(0);
-    // Basit sayaç başlat
-    timerRef.current = setInterval(() => {
-      setRecordingTime(prev => prev + 1);
-    }, 1000);
-  };
-
-  const cancelRecording = () => {
-    setIsRecording(false);
-    setRecordingTime(0);
-    clearInterval(timerRef.current);
-  };
-
-  const sendRecording = () => {
-    // Burada normalde ses dosyası blob olarak alınır.
-    // Şimdilik sesli mesaj gitmiş gibi metin yolluyoruz.
-    const durationText = formatTime(recordingTime);
-    sendMessage(`🎤 Sesli Mesaj (${durationText})`);
-    cancelRecording();
-  };
-
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
-  };
-
-  // --- GENEL FONKSİYONLAR ---
-  const onEmojiClick = (emojiData: any) => {
-    setInputText((prev) => prev + emojiData.emoji);
-  };
+  const onEmojiClick = (emojiData: any) => setInputText((prev) => prev + emojiData.emoji);
 
   const fetchUsers = async () => {
     try {
@@ -105,9 +67,7 @@ export default function Chat({ currentUser, onLogout }: ChatProps) {
     const init = async () => {
       const storedKey = localStorage.getItem('myPrivateKey');
       if (storedKey) {
-        try {
-          setMyPrivateKeyObj(await importPrivateKey(storedKey));
-        } catch (e) { console.error(e); }
+        try { setMyPrivateKeyObj(await importPrivateKey(storedKey)); } catch (e) {}
       }
       await fetchUsers();
     };
@@ -132,7 +92,7 @@ export default function Chat({ currentUser, onLogout }: ChatProps) {
             try {
               const acikMesaj = await decryptMessage(sifreliMesaj, myPrivateKeyObj);
               setMessages(prev => [...prev, { 
-                id: generateId(), user: gonderen, text: acikMesaj, time: getCurrentTime() 
+                id: Math.random().toString(), user: gonderen, text: acikMesaj, time: getCurrentTime() 
               }]);
             } catch (err) {}
           }
@@ -146,171 +106,238 @@ export default function Chat({ currentUser, onLogout }: ChatProps) {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const sendMessage = async (textToSend: string = inputText) => {
-    if (connection && textToSend.trim() && selectedUser) {
+  const sendMessage = async () => {
+    if (connection && inputText.trim() && selectedUser) {
       try {
         const response = await axios.get(`http://localhost:5124/api/kullanici/publickey/${selectedUser}`);
         const targetKeyObj = await importPublicKey(response.data.publicKey);
-        const encryptedText = await encryptMessage(textToSend, targetKeyObj);
+        const encryptedText = await encryptMessage(inputText, targetKeyObj);
         
         await connection.invoke("OzelMesajGonder", selectedUser, encryptedText);
 
         setMessages(prev => [...prev, { 
-          id: generateId(), user: currentUser, text: textToSend, time: getCurrentTime() 
+          id: Math.random().toString(), user: currentUser, text: inputText, time: getCurrentTime() 
         }]);
         setInputText('');
         setShowEmojiPicker(false);
         setShowAttachMenu(false);
-      } catch (e) { alert("Mesaj gönderilemedi"); }
+      } catch (e) { alert("Mesaj iletilemedi"); }
     }
   };
 
-  const filteredUsers = allUsers.filter(u => 
-    u.kullaniciAdi.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
+  const filteredUsers = allUsers.filter(u => u.kullaniciAdi.toLowerCase().includes(searchQuery.toLowerCase()));
   const selectedUserData = allUsers.find(u => u.kullaniciAdi === selectedUser);
   const isSelectedUserOnline = selectedUser && onlineUsers.includes(selectedUser);
 
   return (
-    <div className="flex h-screen bg-[#d1d7db] font-sans overflow-hidden" onClick={() => {}}>
+    <div className="flex h-screen bg-gray-100 font-sans text-gray-900 overflow-hidden" onClick={() => { setShowEmojiPicker(false); setShowAttachMenu(false); }}>
       
-      {/* SOL TARA: Sidebar */}
-      <div className="w-[30%] min-w-[300px] bg-white border-r border-gray-300 flex flex-col z-10 relative">
-        <div className="h-[60px] bg-[#f0f2f5] px-4 flex items-center justify-between border-b border-gray-200">
+      {/* SOL TARA: Sidebar (Modern & Temiz) */}
+      <div className="w-[320px] bg-white border-r border-gray-200 flex flex-col z-20 shadow-lg relative">
+        
+        {/* Header */}
+        <div className="h-20 px-6 flex items-center justify-between bg-white border-b border-gray-100">
           <div className="flex items-center gap-3">
-             <div className="w-10 h-10 rounded-full bg-gray-300 overflow-hidden flex items-center justify-center text-gray-600 font-bold text-lg">
+             <div className="w-11 h-11 rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 text-white flex items-center justify-center font-bold text-lg shadow-md">
                {currentUser.charAt(0).toUpperCase()}
              </div>
-             <span className="font-semibold text-gray-700">{currentUser}</span>
+             <div>
+               <h3 className="font-bold text-gray-800 text-base">{currentUser}</h3>
+               <span className="text-xs text-emerald-600 font-medium">● Çevrimiçi</span>
+             </div>
           </div>
-          <button onClick={onLogout} className="text-gray-500 hover:text-red-500 transition p-2" title="Çıkış Yap">
-             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
+          <button onClick={onLogout} className="p-2 rounded-full hover:bg-red-50 text-gray-400 hover:text-red-500 transition duration-200" title="Çıkış Yap">
+             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
           </button>
         </div>
-        <div className="p-2 border-b border-gray-100 bg-white">
-          <div className="bg-[#f0f2f5] h-9 rounded-lg px-4 flex items-center gap-3 focus-within:bg-white focus-within:shadow-sm focus-within:ring-1 focus-within:ring-green-500 transition-all">
-             <svg viewBox="0 0 24 24" width="20" height="20" className="text-gray-500"><path fill="currentColor" d="M15.009 13.805h-.636l-.22-.219a5.184 5.184 0 0 0 1.256-3.386 5.207 5.207 0 1 0-5.207 5.208 5.183 5.183 0 0 0 3.385-1.254l.22.22v.635l4.004 3.999 1.194-1.195-3.997-4.008zm-4.808 0a3.605 3.605 0 1 1 0-7.21 3.605 3.605 0 0 1 0 7.21z"></path></svg>
-             <input type="text" placeholder="Aratın veya yeni sohbet başlatın" className="bg-transparent outline-none text-sm w-full text-gray-700 placeholder-gray-500" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
+        
+        {/* Arama Barı */}
+        <div className="px-5 py-4">
+          <div className="relative group">
+             <svg xmlns="http://www.w3.org/2000/svg" className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400 group-focus-within:text-emerald-600 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+             <input 
+               type="text" 
+               placeholder="Sohbetlerde ara..." 
+               className="w-full bg-gray-50 border border-gray-200 text-gray-700 text-sm rounded-xl pl-10 pr-4 py-3 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all placeholder-gray-400"
+               value={searchQuery}
+               onChange={(e) => setSearchQuery(e.target.value)}
+             />
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto custom-scrollbar bg-white">
-          {filteredUsers.length === 0 ? <div className="text-center text-gray-400 mt-10 text-sm">Kullanıcı bulunamadı</div> : 
+
+        {/* Kullanıcı Listesi */}
+        <div className="flex-1 overflow-y-auto custom-scrollbar px-3 pb-4 space-y-1">
+          {filteredUsers.length === 0 ? (
+             <div className="text-center text-gray-400 mt-10 text-sm font-medium">Kullanıcı bulunamadı</div>
+          ) : (
             filteredUsers.map(u => {
               const isOnline = onlineUsers.includes(u.kullaniciAdi);
               const isSelected = selectedUser === u.kullaniciAdi;
               return (
-                <div key={u.kullaniciAdi} onClick={() => setSelectedUser(u.kullaniciAdi)} className={`flex items-center gap-3 p-3 cursor-pointer border-b border-gray-100 hover:bg-[#f5f6f6] transition-colors h-[72px] ${isSelected ? 'bg-[#f0f2f5]' : ''}`}>
-                  <div className="relative">
-                    <div className="w-[49px] h-[49px] rounded-full bg-gray-200 flex items-center justify-center text-gray-500 font-bold text-xl">{u.kullaniciAdi.charAt(0).toUpperCase()}</div>
-                    {isOnline && <div className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-green-500 border-2 border-white rounded-full"></div>}
-                  </div>
-                  <div className="flex-1 min-w-0 pr-2">
-                    <div className="flex justify-between items-baseline mb-0.5">
-                      <span className="font-normal text-gray-900 text-[17px]">{u.kullaniciAdi}</span>
-                      <span className={`text-[12px] ${isOnline ? 'text-green-600' : 'text-gray-500'}`}>{isOnline ? 'Şimdi' : formatLastSeen(u.sonGorulme)}</span>
+                <motion.div 
+                  key={u.kullaniciAdi}
+                  whileHover={{ scale: 1.01 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={(e) => { e.stopPropagation(); setSelectedUser(u.kullaniciAdi); }}
+                  className={`flex items-center gap-4 p-3 rounded-xl cursor-pointer transition-all duration-200
+                    ${isSelected ? 'bg-emerald-50 border border-emerald-100 shadow-sm' : 'hover:bg-gray-50 border border-transparent'}`}
+                >
+                  <div className="relative shrink-0">
+                    <div className={`w-12 h-12 rounded-full flex items-center justify-center font-bold text-lg transition-colors
+                      ${isSelected ? 'bg-emerald-200 text-emerald-800' : 'bg-gray-100 text-gray-500'}`}>
+                      {u.kullaniciAdi.charAt(0).toUpperCase()}
                     </div>
-                    <div className="text-[14px] text-gray-500 truncate">{isOnline ? 'Müsait' : 'Görülme yok'}</div>
+                    {isOnline && <div className="absolute bottom-0.5 right-0.5 w-3.5 h-3.5 bg-green-500 border-2 border-white rounded-full shadow-sm"></div>}
                   </div>
-                </div>
+                  
+                  <div className="flex-1 min-w-0">
+                    <div className="flex justify-between items-center mb-0.5">
+                      <span className={`font-semibold text-sm truncate ${isSelected ? 'text-emerald-900' : 'text-gray-900'}`}>{u.kullaniciAdi}</span>
+                      <span className="text-[11px] text-gray-400 font-medium">
+                        {isOnline ? 'Şimdi' : formatLastSeen(u.sonGorulme)}
+                      </span>
+                    </div>
+                    <div className="text-xs text-gray-500 truncate flex items-center gap-1">
+                      {isOnline ? <span className="text-emerald-600 font-medium">Müsait</span> : 'Görülme yok'}
+                    </div>
+                  </div>
+                </motion.div>
               );
-            })}
+            })
+          )}
         </div>
       </div>
 
       {/* SAĞ TARA: Chat Ekranı */}
-      <div className="flex-1 flex flex-col bg-[#efeae2] relative border-l border-gray-300">
-        <div className="absolute inset-0 opacity-40 pointer-events-none" style={{ backgroundImage: "url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')", backgroundSize: '400px' }}></div>
-        <div className="h-[60px] bg-[#f0f2f5] px-4 flex items-center justify-between border-b border-gray-200 z-10">
-          {selectedUser ? (
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-gray-300 rounded-full flex items-center justify-center text-gray-600 font-bold">{selectedUser.charAt(0)}</div>
-              <div className="flex flex-col justify-center">
-                <span className="font-semibold text-gray-800 text-md leading-tight">{selectedUser}</span>
-                <span className="text-[13px] leading-tight">{isSelectedUserOnline ? <span className="text-gray-600">çevrimiçi</span> : <span className="text-gray-500">{selectedUserData ? `son görülme ${formatLastSeen(selectedUserData.sonGorulme)}` : ''}</span>}</span>
+      <div className="flex-1 flex flex-col bg-[#eef2f6] relative">
+        
+        {/* Arka Plan Deseni (Çok Hafif) */}
+        <div className="absolute inset-0 opacity-[0.03] pointer-events-none" style={{
+            backgroundImage: "url('https://www.transparenttextures.com/patterns/cubes.png')"
+        }}></div>
+
+        {selectedUser ? (
+          <>
+            {/* Chat Header (Glassmorphism) */}
+            <div className="h-20 px-8 flex items-center justify-between bg-white/80 backdrop-blur-md border-b border-gray-200/60 sticky top-0 z-10">
+              <div className="flex items-center gap-4">
+                <div className="w-10 h-10 rounded-full bg-gradient-to-r from-gray-200 to-gray-300 flex items-center justify-center text-gray-600 font-bold shadow-inner">
+                  {selectedUser.charAt(0)}
+                </div>
+                <div>
+                  <h2 className="font-bold text-gray-800 text-lg leading-tight">{selectedUser}</h2>
+                  <span className="text-xs font-medium flex items-center gap-1.5">
+                    {isSelectedUserOnline 
+                      ? <><span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span> <span className="text-green-600">Çevrimiçi</span></>
+                      : <span className="text-gray-500">Son görülme: {selectedUserData ? formatLastSeen(selectedUserData.sonGorulme) : '-'}</span>}
+                  </span>
+                </div>
+              </div>
+              
+              <div className="flex items-center gap-4 text-gray-400">
+                 <button className="hover:text-emerald-600 transition p-2 hover:bg-emerald-50 rounded-full"><svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M15.9 14.3H15l-.3-.3c1-1.1 1.6-2.7 1.6-4.3 0-3.7-3-6.7-6.7-6.7S3 6 3 9.7s3 6.7 6.7 6.7c1.6 0 3.2-.6 4.3-1.6l.3.3v.8l5.1 5.1 1.5-1.5-5-5.2zm-6.2 0c-2.6 0-4.6-2.1-4.6-4.6s2.1-4.6 4.6-4.6 4.6 2.1 4.6 4.6-2 4.6-4.6 4.6z"></path></svg></button>
+                 <button className="hover:text-emerald-600 transition p-2 hover:bg-emerald-50 rounded-full"><svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M12 7a2 2 0 1 0-.001-4.001A2 2 0 0 0 12 7zm0 2a2 2 0 1 0-.001 3.999A2 2 0 0 0 12 9zm0 6a2 2 0 1 0-.001 3.999A2 2 0 0 0 12 15z"></path></svg></button>
               </div>
             </div>
-          ) : <span className="text-gray-500">Sohbet seçiniz</span>}
-          <div className="flex gap-5 text-[#54656f]">
-             <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" className="cursor-pointer"><path d="M15.9 14.3H15l-.3-.3c1-1.1 1.6-2.7 1.6-4.3 0-3.7-3-6.7-6.7-6.7S3 6 3 9.7s3 6.7 6.7 6.7c1.6 0 3.2-.6 4.3-1.6l.3.3v.8l5.1 5.1 1.5-1.5-5-5.2zm-6.2 0c-2.6 0-4.6-2.1-4.6-4.6s2.1-4.6 4.6-4.6 4.6 2.1 4.6 4.6-2 4.6-4.6 4.6z"></path></svg>
-             <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" className="cursor-pointer"><path d="M12 7a2 2 0 1 0-.001-4.001A2 2 0 0 0 12 7zm0 2a2 2 0 1 0-.001 3.999A2 2 0 0 0 12 9zm0 6a2 2 0 1 0-.001 3.999A2 2 0 0 0 12 15z"></path></svg>
-          </div>
-        </div>
 
-        <div className="flex-1 overflow-y-auto p-4 space-y-2 z-0 custom-scrollbar" onClick={() => { setShowEmojiPicker(false); setShowAttachMenu(false); }}>
-          {messages.map((msg, index) => {
-            const isMe = msg.user === currentUser;
-            return (
-              <motion.div key={index} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className={`flex ${isMe ? 'justify-end' : 'justify-start'} mb-1`}>
-                <div className={`px-2 py-1.5 rounded-lg shadow-sm max-w-[65%] relative text-[14.2px] leading-[19px] ${isMe ? 'bg-[#d9fdd3] text-[#111b21] rounded-tr-none' : 'bg-white text-[#111b21] rounded-tl-none'}`}>
-                  {!isMe && <div className="text-[12px] font-bold text-orange-700 mb-1">{msg.user}</div>}
-                  <span className="pr-16 pb-1 inline-block whitespace-pre-wrap">{msg.text}</span>
-                  <div className="float-right mt-1 ml-2 flex items-center gap-1 absolute bottom-1 right-2">
-                    <span className="text-[11px] text-gray-500">{msg.time}</span>
-                    {isMe && <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5 text-blue-500"><path fillRule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clipRule="evenodd" /></svg>}
-                  </div>
-                </div>
-              </motion.div>
-            );
-          })}
-          <div ref={messagesEndRef} />
-        </div>
+            {/* Mesaj Alanı */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-3 z-0 custom-scrollbar">
+              {messages.map((msg) => {
+                const isMe = msg.user === currentUser;
+                return (
+                  <motion.div 
+                    key={msg.id}
+                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}
+                  >
+                    <div className={`px-4 py-3 max-w-[65%] shadow-sm relative text-[15px] leading-relaxed
+                       ${isMe 
+                         ? 'bg-emerald-600 text-white rounded-2xl rounded-tr-none' 
+                         : 'bg-white text-gray-800 border border-gray-100 rounded-2xl rounded-tl-none'}
+                    `}>
+                      {!isMe && <div className="text-[11px] font-bold text-emerald-600 mb-1 tracking-wide">{msg.user}</div>}
+                      
+                      <span className="break-words">{msg.text}</span>
+                      
+                      <div className={`text-[10px] text-right mt-1.5 font-medium opacity-80 ${isMe ? 'text-emerald-100' : 'text-gray-400'}`}>
+                        {msg.time}
+                        {isMe && <span className="ml-1 inline-block">✓</span>}
+                      </div>
+                    </div>
+                  </motion.div>
+                );
+              })}
+              <div ref={messagesEndRef} />
+            </div>
 
-        {/* --- DİNAMİK INPUT ALANI (YAZI vs KAYIT) --- */}
-        <div className="min-h-[62px] bg-[#f0f2f5] px-4 py-2 flex items-center gap-3 z-10 border-t border-gray-200 relative">
-           
-           {/* POPUP PANELLER */}
-           {showEmojiPicker && <div className="absolute bottom-[70px] left-4 shadow-2xl z-50"><EmojiPicker onEmojiClick={onEmojiClick} height={400} width={300} searchDisabled={false} /></div>}
-           {showAttachMenu && (
-             <motion.div initial={{opacity: 0, scale: 0.9, y: 10}} animate={{opacity: 1, scale: 1, y: 0}} className="absolute bottom-[70px] left-12 flex flex-col-reverse gap-3 z-50 mb-2 ml-1">
-                <div className="flex items-center gap-3 group cursor-pointer"><div className="w-12 h-12 rounded-full bg-indigo-500 flex items-center justify-center text-white shadow-lg hover:scale-105 transition"><span className="text-xl">📄</span></div></div>
-                <div className="flex items-center gap-3 group cursor-pointer"><div className="w-12 h-12 rounded-full bg-pink-500 flex items-center justify-center text-white shadow-lg hover:scale-105 transition"><span className="text-xl">📷</span></div></div>
-                <div className="flex items-center gap-3 group cursor-pointer"><div className="w-12 h-12 rounded-full bg-purple-500 flex items-center justify-center text-white shadow-lg hover:scale-105 transition"><span className="text-xl">🖼️</span></div></div>
-             </motion.div>
-           )}
+            {/* Input Alanı (Floating Bar) */}
+            <div className="p-6 pt-2 z-20">
+               <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-2 flex items-center gap-2 relative">
+                 
+                 {/* Popup Paneller */}
+                 <AnimatePresence>
+                   {showEmojiPicker && (
+                     <motion.div initial={{opacity:0, y:10}} animate={{opacity:1, y:0}} exit={{opacity:0, y:10}} className="absolute bottom-[80px] left-0 shadow-2xl rounded-2xl overflow-hidden z-50">
+                       <EmojiPicker onEmojiClick={onEmojiClick} height={350} width={300} searchDisabled={false} />
+                     </motion.div>
+                   )}
+                   {showAttachMenu && (
+                     <motion.div initial={{opacity:0, scale:0.9}} animate={{opacity:1, scale:1}} exit={{opacity:0, scale:0.9}} className="absolute bottom-[80px] left-12 flex flex-col gap-2 z-50 bg-white p-2 rounded-xl shadow-lg border border-gray-100">
+                        <button className="flex items-center gap-3 p-2 hover:bg-gray-50 rounded-lg text-gray-700 text-sm font-medium transition"><span className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center">📄</span> Belge</button>
+                        <button className="flex items-center gap-3 p-2 hover:bg-gray-50 rounded-lg text-gray-700 text-sm font-medium transition"><span className="w-8 h-8 rounded-full bg-pink-100 text-pink-600 flex items-center justify-center">📷</span> Fotoğraf</button>
+                     </motion.div>
+                   )}
+                 </AnimatePresence>
 
-           {/* --- MOD DEĞİŞİMİ: KAYIT MI YAZI MI? --- */}
-           {isRecording ? (
-             // --- KAYIT MODU ---
-             <div className="flex-1 flex items-center justify-between">
-                <div className="flex items-center gap-2 text-red-500 animate-pulse">
-                   <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><circle cx="12" cy="12" r="6"></circle></svg>
-                   <span className="text-lg font-medium text-gray-600">{formatTime(recordingTime)}</span>
-                </div>
-                <div className="flex items-center gap-4">
-                   <button onClick={cancelRecording} className="text-gray-500 hover:text-red-500 transition font-medium text-sm uppercase tracking-wider">İptal</button>
-                   <button onClick={sendRecording} className="w-10 h-10 bg-[#00a884] rounded-full flex items-center justify-center text-white shadow-md hover:scale-110 transition">
-                      <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M9 17.2l-4-4-1.4 1.3 5.4 5.4 12-12-1.4-1.3z"></path></svg>
+                 {/* Sol Butonlar */}
+                 <div className="flex items-center gap-1 pl-1">
+                   <button onClick={(e) => { e.stopPropagation(); setShowEmojiPicker(!showEmojiPicker); setShowAttachMenu(false); }} className={`p-2 rounded-full transition-all duration-200 ${showEmojiPicker ? 'bg-yellow-100 text-yellow-600' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'}`}>
+                     <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M8 14s1.5 2 4 2 4-2 4-2"></path><line x1="9" y1="9" x2="9.01" y2="9"></line><line x1="15" y1="9" x2="15.01" y2="9"></line></svg>
                    </button>
-                </div>
-             </div>
-           ) : (
-             // --- YAZI MODU ---
-             <>
-               <button onClick={(e) => { e.stopPropagation(); setShowEmojiPicker(!showEmojiPicker); setShowAttachMenu(false); }} className={`hover:text-gray-700 transition ${showEmojiPicker ? 'text-[#00a884]' : 'text-[#54656f]'}`}>
-                 <svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor"><path d="M9.153 11.603c.795 0 1.439-.879 1.439-1.962s-.644-1.962-1.439-1.962-1.439.879-1.439 1.962.644 1.962 1.439 1.962zm-3.204 1.362c-.026-.307-.131 5.218 6.063 5.551 6.066-.25 6.066-5.551 6.066-5.551-6.078 1.416-12.129 0-12.129 0zm11.363 1.108s-.669 1.959-5.051 1.959c-3.505 0-5.388-1.164-5.607-1.959 0 0 5.912 1.055 10.658 0zM11.804 1.011C5.609 1.011.978 6.033.978 12.228s4.826 10.761 11.021 10.761S23.02 18.423 23.02 12.228c.001-6.195-5.021-11.217-11.216-11.217zM12 21.354c-5.273 0-9.381-3.886-9.381-9.159s3.942-9.548 9.215-9.548 9.548 4.275 9.548 9.548c-.001 5.272-4.109 9.159-9.382 9.159zm3.108-9.751c.795 0 1.439-.879 1.439-1.962s-.644-1.962-1.439-1.962-1.439.879-1.439 1.962.644 1.962 1.439 1.962z"></path></svg>
-               </button>
-               <button onClick={(e) => { e.stopPropagation(); setShowAttachMenu(!showAttachMenu); setShowEmojiPicker(false); }} className={`hover:text-gray-700 transition ${showAttachMenu ? 'text-[#00a884]' : 'text-[#54656f]'}`}>
-                 <svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor"><path d="M1.816 15.556v.002c0 1.502.584 2.912 1.646 3.972s2.472 1.647 3.974 1.647a5.58 5.58 0 0 0 3.972-1.645l9.547-9.548c.769-.768 1.147-1.767 1.058-2.817-.079-.968-.548-1.927-1.319-2.698-1.594-1.592-4.068-1.711-5.517-.262l-7.916 7.915c-.881.881-.792 2.25.214 3.261.959.958 2.423 1.053 3.263.215l5.511-5.512c.28-.28.267-.722.053-.936l-.244-.244c-.191-.191-.567-.349-.957.04l-5.506 5.506c-.18.18-.635.127-.976-.214-.098-.097-.576-.613-.213-.973l7.915-7.917c.818-.817 2.267-.699 3.23.262.5.501.802 1.1.849 1.685.051.573-.156 1.111-.589 1.543l-9.547 9.549a3.97 3.97 0 0 1-2.829 1.171 3.975 3.975 0 0 1-2.83-1.173 3.973 3.973 0 0 1-1.172-2.828c0-1.071.415-2.076 1.172-2.83l7.209-7.211c.157-.157.264-.579.028-.814L11.5 4.36a.57.57 0 0 0-.834.018l-7.205 7.207a5.577 5.577 0 0 0-1.645 3.971z"></path></svg>
-               </button>
-               <div className="flex-1 bg-white rounded-lg px-4 py-2 border border-white focus-within:border-white">
-                 <input type="text" className="w-full outline-none text-gray-700 placeholder-gray-500 text-[15px] bg-transparent" placeholder="Bir mesaj yazın" value={inputText} onChange={e => setInputText(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendMessage()} disabled={!selectedUser} onClick={(e) => e.stopPropagation()} />
-               </div>
-               
-               {/* GÖNDER VEYA MİKROFON İKONU */}
-               {inputText.trim() ? (
-                 <button onClick={() => sendMessage()} disabled={!selectedUser} className="text-[#00a884] transition transform hover:scale-110">
-                    <svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor"><path d="M16.6915026,12.4744748 L3.50622396,19.7593859 C3.0844005,19.9925026 2.56942699,19.8953151 2.25707664,19.5393665 C2.12053183,19.3837941 2.06202159,19.1764654 2.0950346,18.972333 L3.06456221,12.9734107 L11.0280949,12.4744748 L3.06456221,11.9755389 L2.0950346,5.97661664 C2.02534579,5.54538806 2.32172776,5.14257556 2.75295634,5.07288674 C2.95708874,5.03987373 3.16441738,5.09838397 3.31998982,5.23492878 L16.6915026,12.4744748 Z"></path></svg>
-                 </button>
-               ) : (
-                 <button onClick={startRecording} disabled={!selectedUser} className="text-[#54656f] hover:text-[#00a884] transition">
-                    <svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor"><path d="M11.999 14.942c2.001 0 3.531-1.53 3.531-3.531V4.35c0-2.001-1.53-3.531-3.531-3.531S8.469 2.35 8.469 4.35v7.061c0 2.001 1.53 3.531 3.53 3.531zm6.238-3.53c0 3.531-2.942 6.002-6.237 6.002s-6.237-2.471-6.237-6.002H3.761c0 4.001 3.178 7.297 7.061 7.885v3.884h2.354v-3.884c3.884-.588 7.061-3.884 7.061-7.885h-2z"></path></svg>
-                 </button>
-               )}
-             </>
-           )}
-        </div>
+                   <button onClick={(e) => { e.stopPropagation(); setShowAttachMenu(!showAttachMenu); setShowEmojiPicker(false); }} className={`p-2 rounded-full transition-all duration-200 ${showAttachMenu ? 'bg-indigo-100 text-indigo-600' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'}`}>
+                     <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg>
+                   </button>
+                 </div>
 
+                 {/* Input */}
+                 <input 
+                   type="text" 
+                   className="flex-1 bg-transparent border-none outline-none text-gray-700 placeholder-gray-400 px-2 py-3 font-medium" 
+                   placeholder="Bir şeyler yazın..." 
+                   value={inputText} 
+                   onChange={e => setInputText(e.target.value)} 
+                   onKeyDown={e => e.key === 'Enter' && sendMessage()} 
+                   onClick={(e) => e.stopPropagation()} 
+                 />
+                 
+                 {/* Gönder Butonu */}
+                 <button 
+                    onClick={sendMessage} 
+                    disabled={!inputText.trim()}
+                    className={`p-3 rounded-xl transition-all duration-300 flex items-center justify-center shadow-md mr-1
+                      ${inputText.trim() 
+                        ? 'bg-emerald-600 text-white hover:bg-emerald-700 hover:scale-105 cursor-pointer' 
+                        : 'bg-gray-100 text-gray-400 cursor-default'}`}
+                 >
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+                 </button>
+               </div>
+            </div>
+          </>
+        ) : (
+          <div className="flex-1 flex flex-col items-center justify-center text-gray-400 bg-[#eef2f6]">
+             <div className="w-24 h-24 bg-white rounded-full flex items-center justify-center mb-6 shadow-sm">
+               <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" strokeWidth={1} className="text-gray-300"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+             </div>
+             <h3 className="text-lg font-semibold text-gray-600 mb-2">Hoş Geldiniz, {currentUser}!</h3>
+             <p className="text-sm opacity-70">Görüşmeye başlamak için sol menüden bir kişi seçin.</p>
+             <div className="mt-8 text-xs flex items-center gap-2 text-emerald-600/70 bg-emerald-50 px-4 py-2 rounded-full">
+               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth={2}><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+               Uçtan Uca Şifreli Bağlantı
+             </div>
+          </div>
+        )}
       </div>
     </div>
   );
