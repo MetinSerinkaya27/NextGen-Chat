@@ -1,46 +1,51 @@
 import { useState } from 'react';
 import axios from 'axios';
 import { motion } from 'framer-motion';
-import { generateKeyPair, exportKeyToBase64 } from '../utils/crypto';
 
-// "Giriş Yap" sayfasına geçiş için gereken özellik
-interface RegisterProps {
-  switchToLogin: () => void;
+interface LoginProps {
+  onLoginSuccess: (username: string) => void;
+  switchToRegister: () => void;
 }
 
-export default function Register({ switchToLogin }: RegisterProps) {
+export default function Login({ onLoginSuccess, switchToRegister }: LoginProps) {
   const [username, setUsername] = useState('');
   const [status, setStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [isFocused, setIsFocused] = useState(false); // Hatayı çözer: Artık kullanıyoruz
+  const [isFocused, setIsFocused] = useState(false);
 
-  const handleRegister = async () => {
+  const handleLogin = async () => {
     if (!username) return;
     setLoading(true);
     setStatus(null);
 
-    // Animasyon tadı için minik bekleme
-    await new Promise(r => setTimeout(r, 800));
+    // Animasyon hissi için ufak bekleme
+    await new Promise(r => setTimeout(r, 600));
+
+    // 1. Önce cihazda anahtar var mı diye bakıyoruz
+    const storedKey = localStorage.getItem('myPrivateKey');
+    
+    if (!storedKey) {
+      setStatus('⚠️ Bu cihazda anahtarınız yok. Önce kayıt olmalısınız.');
+      setLoading(false);
+      return;
+    }
 
     try {
-      // 1. Kriptografik Anahtarları Üret
-      const keyPair = await generateKeyPair();
-      const publicKeyBase64 = await exportKeyToBase64(keyPair.publicKey);
-      const privateKeyBase64 = await exportKeyToBase64(keyPair.privateKey);
-      
-      // 2. Private Key'i tarayıcıya sakla
-      localStorage.setItem('myPrivateKey', privateKeyBase64);
-      localStorage.setItem('myUsername', username);
-
-      // 3. Backend'e kaydet
-      const response = await axios.post('http://localhost:5124/api/kullanici/kayit', {
+      // 2. Backend'e giriş isteği at
+      const response = await axios.post('http://localhost:5124/api/kullanici/giris', {
         kullaniciAdi: username,
-        publicKey: publicKeyBase64
+        publicKey: "string" 
       });
 
-      setStatus(`✅ Hoş geldin, ${response.data.kullaniciAdi}`);
+      setStatus(`✅ Giriş Başarılı! Yönlendiriliyorsunuz...`);
+      
+      // 1 saniye sonra ana ekrana al
+      setTimeout(() => {
+        onLoginSuccess(response.data.kullaniciAdi);
+      }, 1000);
+
     } catch (error) {
-      setStatus('❌ Sunucu hatası veya isim dolu.');
+      setStatus('❌ Kullanıcı bulunamadı veya sunucu hatası.');
     } finally {
       setLoading(false);
     }
@@ -49,10 +54,10 @@ export default function Register({ switchToLogin }: RegisterProps) {
   return (
     <div className="flex min-h-screen w-full font-sans bg-white overflow-hidden">
       
-      {/* --- SOL TARA: YAŞAYAN VİTRİN (GERİ GELDİ!) --- */}
+      {/* --- SOL TARA: VİTRİN (Register ile Aynı Premium Tasarım) --- */}
       <div className="hidden lg:flex w-[55%] relative bg-[#022c22] flex-col items-center justify-center overflow-hidden">
         
-        {/* Hareket Eden Arka Plan Işıkları (motion hatası burada çözülüyor) */}
+        {/* Hareketli Arka Plan Işıkları */}
         <motion.div 
           animate={{ scale: [1, 1.2, 1], rotate: [0, 45, 0], x: [0, 50, 0] }}
           transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
@@ -67,7 +72,7 @@ export default function Register({ switchToLogin }: RegisterProps) {
         {/* Noise Texture */}
         <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-10 z-0"></div>
 
-        {/* Cam Kart */}
+        {/* Cam Kart (İçerik Farklı) */}
         <motion.div 
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -76,28 +81,32 @@ export default function Register({ switchToLogin }: RegisterProps) {
         >
           <div className="w-16 h-16 bg-emerald-500/20 rounded-2xl flex items-center justify-center mx-auto mb-6 backdrop-blur-md border border-emerald-500/30">
             <svg className="w-8 h-8 text-emerald-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1" />
             </svg>
           </div>
-          <h2 className="text-3xl font-bold text-white mb-3">Uçtan Uca Şifreli</h2>
+          <h2 className="text-3xl font-bold text-white mb-3">Tekrar Hoş Geldiniz</h2>
           <p className="text-emerald-100/70 font-light leading-relaxed">
-            NextGen Chat, verilerinizi askeri düzeyde şifreleme ile korur. Mesajlarınızı sadece siz ve alıcı okuyabilir.
+            Güvenli hattınız hazır. Kaldığınız yerden şifreli iletişime devam etmek için kimliğinizi doğrulayın.
           </p>
         </motion.div>
       </div>
 
-      {/* --- SAĞ TARA: İNTERAKTİF FORM --- */}
+      {/* --- SAĞ TARA: GİRİŞ FORMU --- */}
       <div className="w-full lg:w-[45%] flex items-center justify-center p-8 bg-white relative">
         <div className="w-full max-w-sm">
           
-          <div className="mb-12">
-            <h1 className="text-4xl font-bold text-gray-900 tracking-tight mb-2">Hesap Oluştur</h1>
-            <p className="text-gray-500">Güvenli mesajlaşmaya başlamak için bir kimlik belirleyin.</p>
-          </div>
+          <motion.div 
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            className="mb-12"
+          >
+            <h1 className="text-4xl font-bold text-gray-900 tracking-tight mb-2">Giriş Yap</h1>
+            <p className="text-gray-500">Devam etmek için kullanıcı adınızı girin.</p>
+          </motion.div>
 
           <div className="space-y-8">
             
-            {/* FLOATING LABEL INPUT (isFocused hatası burada çözülüyor) */}
+            {/* FLOATING LABEL INPUT */}
             <div className="relative group">
               <input 
                 type="text" 
@@ -118,31 +127,38 @@ export default function Register({ switchToLogin }: RegisterProps) {
               </label>
             </div>
 
+            {/* BUTON */}
             <motion.button 
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
-              onClick={handleRegister}
+              onClick={handleLogin}
               disabled={loading}
               className={`w-full h-14 rounded-xl font-bold text-white text-lg shadow-xl shadow-emerald-200 transition-all
                 ${loading 
                   ? 'bg-gray-300 cursor-not-allowed' 
                   : 'bg-emerald-600 hover:bg-emerald-700'}`}
             >
-              {loading ? 'Şifreleme Anahtarları Oluşturuluyor...' : 'Hesap Oluştur'}
+              {loading ? 'Kontrol Ediliyor...' : 'Giriş Yap'}
             </motion.button>
 
+            {/* DURUM MESAJI */}
             {status && (
-              <div className={`p-4 rounded-lg text-sm font-medium ${status.includes('✅') ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
-                {status}
-              </div>
+              <motion.div 
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className={`p-4 rounded-lg text-sm font-medium flex items-center gap-3
+                  ${status.includes('✅') ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}
+              >
+                {status.includes('✅') ? '🚀' : '⚠️'} {status}
+              </motion.div>
             )}
           </div>
 
           <div className="mt-12 text-center">
             <p className="text-sm text-gray-500">
-              Zaten hesabınız var mı?{' '}
-              <button onClick={switchToLogin} className="text-emerald-600 font-bold hover:underline">
-                Giriş Yap
+              Hesabınız yok mu?{' '}
+              <button onClick={switchToRegister} className="text-emerald-600 font-bold hover:underline">
+                Hemen Kayıt Ol
               </button>
             </p>
           </div>

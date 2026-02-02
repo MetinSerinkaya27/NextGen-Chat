@@ -28,4 +28,28 @@ public class KullaniciController : ControllerBase
 
         return Ok(yeniKullanici);
     }
+    // ... (KayitOl fonksiyonu burada bitiyor)
+
+        [HttpPost("giris")]
+        public async Task<IActionResult> GirisYap([FromBody] Kullanici istek)
+        {
+            // 1. Veritabanında bu isimde biri var mı?
+            var kullanici = await _veritabanı.Kullanicilar
+                                          .FirstOrDefaultAsync(u => u.KullaniciAdi == istek.KullaniciAdi);
+
+            if (kullanici == null)
+            {
+                return NotFound(new { mesaj = "Böyle bir kullanıcı bulunamadı!" });
+            }
+
+            // 2. Kullanıcı bulundu, bilgilerini geri dön
+            return Ok(new { 
+                id = kullanici.Id, 
+                kullaniciAdi = kullanici.KullaniciAdi, 
+                publicKey = kullanici.PublicKey,
+                mesaj = "Giriş başarılı!" 
+            });
+        }
+        
+        // ... (Class burada bitiyor)
 }
