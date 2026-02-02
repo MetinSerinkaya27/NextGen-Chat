@@ -24,28 +24,30 @@ export default function Login({ onLoginSuccess, switchToRegister }: LoginProps) 
     // 1. Önce cihazda anahtar var mı diye bakıyoruz
     const storedKey = localStorage.getItem('myPrivateKey');
     
+    // Eğer anahtar yoksa giriş yapamaz (Çünkü eski mesajları çözemez)
     if (!storedKey) {
-      setStatus('⚠️ Bu cihazda anahtarınız yok. Önce kayıt olmalısınız.');
+      setStatus('⚠️ Bu cihazda anahtarınız bulunamadı. Lütfen önce Kayıt Olun.');
       setLoading(false);
       return;
     }
 
     try {
-      // 2. Backend'e giriş isteği at
+      // 2. Backend'e giriş isteği at (Sadece varlığını kontrol ediyoruz)
       const response = await axios.post('http://localhost:5124/api/kullanici/giris', {
         kullaniciAdi: username,
-        publicKey: "string" 
+        publicKey: "MevcutAnahtarKullaniliyor" // Backend sadece kullanıcıyı kontrol edecek
       });
 
       setStatus(`✅ Giriş Başarılı! Yönlendiriliyorsunuz...`);
       
-      // 1 saniye sonra ana ekrana al
+      // 3. Başarılı ise App.tsx'e bildir
       setTimeout(() => {
         onLoginSuccess(response.data.kullaniciAdi);
       }, 1000);
 
     } catch (error) {
-      setStatus('❌ Kullanıcı bulunamadı veya sunucu hatası.');
+      console.error(error);
+      setStatus('❌ Kullanıcı bulunamadı veya şifreleme hatası.');
     } finally {
       setLoading(false);
     }
@@ -72,7 +74,7 @@ export default function Login({ onLoginSuccess, switchToRegister }: LoginProps) 
         {/* Noise Texture */}
         <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-10 z-0"></div>
 
-        {/* Cam Kart (İçerik Farklı) */}
+        {/* Cam Kart */}
         <motion.div 
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}

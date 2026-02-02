@@ -11,16 +11,24 @@ function App() {
   const [currentUser, setCurrentUser] = useState<string | null>(null);
 
   useEffect(() => {
-    // Uygulama açılınca: Tarayıcıda anahtar var mı?
-    // Varsa direkt Login ekranını aç, yoksa Register kalsın.
+    // 1. Uygulama açılınca hafızayı kontrol et
     const savedKey = localStorage.getItem('myPrivateKey');
-    if (savedKey) {
+    const savedUser = localStorage.getItem('chat_username');
+
+    if (savedKey && savedUser) {
+      // Hem anahtar hem kullanıcı adı varsa direkt sohbete al
+      setCurrentUser(savedUser);
+      setCurrentPage('chat');
+    } else if (savedKey) {
+      // Sadece anahtar varsa giriş ekranına al
       setCurrentPage('login');
     }
   }, []);
 
   // Login başarılı olunca çalışacak fonksiyon
   const handleLoginSuccess = (username: string) => {
+    // Kullanıcı adını hafızaya kaydet (F5 için kritik!)
+    localStorage.setItem('chat_username', username);
     setCurrentUser(username);
     setCurrentPage('chat');
   };
@@ -45,9 +53,10 @@ function App() {
         <Chat 
           currentUser={currentUser}
           onLogout={() => { 
-            // Çıkış yapınca her şeyi temizle ve başa dön
-            localStorage.clear(); 
-            setCurrentPage('register'); 
+            // Çıkış yapınca kullanıcı adını sil ama ANAHTARI SİLME (yoksa geçmiş gider)
+            localStorage.removeItem('chat_username'); 
+            setCurrentPage('login'); 
+            setCurrentUser(null);
           }} 
         />
       )}

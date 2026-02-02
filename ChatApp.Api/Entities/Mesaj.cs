@@ -8,8 +8,15 @@ public class Mesaj
     public Guid GonderenId { get; set; }
     public Guid AliciId { get; set; }
     
-    // Şifreli içerik (Backend bunu okuyamaz, sadece taşır)
-    public string SifreliIcerik { get; set; } = string.Empty;
+    // --- DEĞİŞEN KISIM BAŞLANGIÇ ---
+    
+    // 1. Alıcı (Karşı Taraf) okusun diye onun anahtarıyla şifrelenmiş metin
+    public string SifreliIcerikAlici { get; set; } = string.Empty; 
+
+    // 2. Gönderen (Sen) geçmişte okuyabil diye SENİN anahtarınla şifrelenmiş metin
+    public string SifreliIcerikGonderen { get; set; } = string.Empty; 
+    
+    // --- DEĞİŞEN KISIM BİTİŞ ---
     
     // İnternet yokken yazılmış olabilir, gerçek yazılma anı
     public DateTime GonderilmeTarihi { get; set; } 

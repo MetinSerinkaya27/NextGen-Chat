@@ -1,9 +1,8 @@
 import { useState } from 'react';
 import axios from 'axios';
 import { motion } from 'framer-motion';
-import { generateKeyPair, exportKeyToBase64 } from '../utils/crypto';
+import { generateKeyPair, exportPublicKey, exportPrivateKey } from '../utils/crypto';
 
-// "Giriş Yap" sayfasına geçiş için gereken özellik
 interface RegisterProps {
   switchToLogin: () => void;
 }
@@ -12,35 +11,49 @@ export default function Register({ switchToLogin }: RegisterProps) {
   const [username, setUsername] = useState('');
   const [status, setStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [isFocused, setIsFocused] = useState(false); // Hatayı çözer: Artık kullanıyoruz
+  const [isFocused, setIsFocused] = useState(false);
 
   const handleRegister = async () => {
-    if (!username) return;
+    if (!username.trim()) return;
     setLoading(true);
     setStatus(null);
 
-    // Animasyon tadı için minik bekleme
-    await new Promise(r => setTimeout(r, 800));
+    // Animasyon hissi için ufak bekleme
+    await new Promise(r => setTimeout(r, 600));
 
     try {
-      // 1. Kriptografik Anahtarları Üret
+      // 1. KRİPTOGRAFİK ANAHTARLARI OLUŞTUR (RSA-OAEP)
+      // Bu işlem tarayıcının içinde olur, sunucu Private Key'i asla görmez!
       const keyPair = await generateKeyPair();
-      const publicKeyBase64 = await exportKeyToBase64(keyPair.publicKey);
-      const privateKeyBase64 = await exportKeyToBase64(keyPair.privateKey);
-      
-      // 2. Private Key'i tarayıcıya sakla
-      localStorage.setItem('myPrivateKey', privateKeyBase64);
-      localStorage.setItem('myUsername', username);
+      const publicKeyBase64 = await exportPublicKey(keyPair.publicKey);
+      const privateKeyBase64 = await exportPrivateKey(keyPair.privateKey);
 
-      // 3. Backend'e kaydet
+      // 2. BACKEND'E KAYIT OL (Sadece Public Key gider)
       const response = await axios.post('http://localhost:5124/api/kullanici/kayit', {
         kullaniciAdi: username,
         publicKey: publicKeyBase64
       });
 
-      setStatus(`✅ Hoş geldin, ${response.data.kullaniciAdi}`);
-    } catch (error) {
-      setStatus('❌ Sunucu hatası veya isim dolu.');
+      // 3. ANAHTARLARI TARAYICIYA KAYDET (Kritik Nokta!)
+      // Chat.tsx mesaj atarken burada arayacak
+      localStorage.setItem('myPublicKey', publicKeyBase64);
+      localStorage.setItem('myPrivateKey', privateKeyBase64);
+      localStorage.setItem('chat_username', username); // Otomatik giriş için
+
+      setStatus(`✅ Kayıt Başarılı! Anahtarlar oluşturuldu.`);
+      
+      // 4. Sayfayı yenile (App.tsx otomatik olarak Chat ekranını açacak)
+      setTimeout(() => {
+        window.location.reload(); 
+      }, 1500);
+
+    } catch (error: any) {
+      console.error(error);
+      if (error.response && error.response.status === 400) {
+        setStatus('❌ Bu kullanıcı adı zaten alınmış.');
+      } else {
+        setStatus('❌ Sunucu hatası veya bağlantı yok.');
+      }
     } finally {
       setLoading(false);
     }
@@ -49,10 +62,10 @@ export default function Register({ switchToLogin }: RegisterProps) {
   return (
     <div className="flex min-h-screen w-full font-sans bg-white overflow-hidden">
       
-      {/* --- SOL TARA: YAŞAYAN VİTRİN (GERİ GELDİ!) --- */}
+      {/* --- SOL TARA: VİTRİN (Login ile Aynı Premium Tasarım) --- */}
       <div className="hidden lg:flex w-[55%] relative bg-[#022c22] flex-col items-center justify-center overflow-hidden">
         
-        {/* Hareket Eden Arka Plan Işıkları (motion hatası burada çözülüyor) */}
+        {/* Hareketli Arka Plan Işıkları */}
         <motion.div 
           animate={{ scale: [1, 1.2, 1], rotate: [0, 45, 0], x: [0, 50, 0] }}
           transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
@@ -79,25 +92,29 @@ export default function Register({ switchToLogin }: RegisterProps) {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
             </svg>
           </div>
-          <h2 className="text-3xl font-bold text-white mb-3">Uçtan Uca Şifreli</h2>
+          <h2 className="text-3xl font-bold text-white mb-3">Yeni Hesap Oluştur</h2>
           <p className="text-emerald-100/70 font-light leading-relaxed">
-            NextGen Chat, verilerinizi askeri düzeyde şifreleme ile korur. Mesajlarınızı sadece siz ve alıcı okuyabilir.
+            Cihazınızda size özel bir şifreleme anahtarı oluşturulacak. Mesajlarınız sunucuda asla okunabilir halde saklanmaz.
           </p>
         </motion.div>
       </div>
 
-      {/* --- SAĞ TARA: İNTERAKTİF FORM --- */}
+      {/* --- SAĞ TARA: KAYIT FORMU --- */}
       <div className="w-full lg:w-[45%] flex items-center justify-center p-8 bg-white relative">
         <div className="w-full max-w-sm">
           
-          <div className="mb-12">
-            <h1 className="text-4xl font-bold text-gray-900 tracking-tight mb-2">Hesap Oluştur</h1>
-            <p className="text-gray-500">Güvenli mesajlaşmaya başlamak için bir kimlik belirleyin.</p>
-          </div>
+          <motion.div 
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            className="mb-12"
+          >
+            <h1 className="text-4xl font-bold text-gray-900 tracking-tight mb-2">Kayıt Ol</h1>
+            <p className="text-gray-500">Güvenli mesajlaşmaya başlamak için bir isim seçin.</p>
+          </motion.div>
 
           <div className="space-y-8">
             
-            {/* FLOATING LABEL INPUT (isFocused hatası burada çözülüyor) */}
+            {/* FLOATING LABEL INPUT */}
             <div className="relative group">
               <input 
                 type="text" 
@@ -118,6 +135,7 @@ export default function Register({ switchToLogin }: RegisterProps) {
               </label>
             </div>
 
+            {/* KAYIT BUTONU */}
             <motion.button 
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
@@ -128,13 +146,19 @@ export default function Register({ switchToLogin }: RegisterProps) {
                   ? 'bg-gray-300 cursor-not-allowed' 
                   : 'bg-emerald-600 hover:bg-emerald-700'}`}
             >
-              {loading ? 'Şifreleme Anahtarları Oluşturuluyor...' : 'Hesap Oluştur'}
+              {loading ? 'Anahtarlar Üretiliyor...' : 'Hesap Oluştur'}
             </motion.button>
 
+            {/* DURUM MESAJI */}
             {status && (
-              <div className={`p-4 rounded-lg text-sm font-medium ${status.includes('✅') ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
-                {status}
-              </div>
+              <motion.div 
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className={`p-4 rounded-lg text-sm font-medium flex items-center gap-3
+                  ${status.includes('✅') ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}
+              >
+                {status.includes('✅') ? '🔑' : '⚠️'} {status}
+              </motion.div>
             )}
           </div>
 
