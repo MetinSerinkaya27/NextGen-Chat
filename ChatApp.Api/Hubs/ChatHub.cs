@@ -9,7 +9,7 @@ namespace ChatApp.Api.Hubs
     public class ChatHub : Hub
     {
         private readonly UygulamaDbContext _context;
-        // Kullanıcı Adı -> ConnectionId eşleşmesi
+        // Kullanıcı Adı -> ConnectionId Eşleşmesi
         private static ConcurrentDictionary<string, string> OnlineKullanicilar = new ConcurrentDictionary<string, string>();
 
         public ChatHub(UygulamaDbContext context)
@@ -24,18 +24,15 @@ namespace ChatApp.Api.Hubs
             
             if (!string.IsNullOrEmpty(kullaniciAdi))
             {
-                // Listeye ekle veya güncelle
                 OnlineKullanicilar.AddOrUpdate(kullaniciAdi, Context.ConnectionId, (key, oldValue) => Context.ConnectionId);
                 
-                // DB'de 'Online' yap (SonGorulme = null)
                 var user = await _context.Kullanicilar.FirstOrDefaultAsync(u => u.KullaniciAdi == kullaniciAdi);
                 if (user != null)
                 {
-                    user.SonGorulme = null;
+                    user.SonGorulme = null; // Online
                     await _context.SaveChangesAsync();
                 }
 
-                // Herkese online listesini gönder
                 await Clients.All.SendAsync("KullaniciListesi", OnlineKullanicilar.Keys.ToList());
             }
             await base.OnConnectedAsync();
@@ -44,7 +41,6 @@ namespace ChatApp.Api.Hubs
         // --- KOPMA ---
         public override async Task OnDisconnectedAsync(Exception? exception)
         {
-            // ConnectionId'den kullanıcı adını bul
             var item = OnlineKullanicilar.FirstOrDefault(x => x.Value == Context.ConnectionId);
             string? kullaniciAdi = item.Key;
             
@@ -52,7 +48,6 @@ namespace ChatApp.Api.Hubs
             {
                 OnlineKullanicilar.TryRemove(kullaniciAdi, out _);
 
-                // DB'ye son görülme tarihini yaz
                 var user = await _context.Kullanicilar.FirstOrDefaultAsync(u => u.KullaniciAdi == kullaniciAdi);
                 if (user != null)
                 {
@@ -65,16 +60,15 @@ namespace ChatApp.Api.Hubs
             await base.OnDisconnectedAsync(exception);
         }
 
-        // --- MESAJ GÖNDERME ---
-        public async Task OzelMesajGonder(string aliciAdi, string sifreliAliciIcin, string sifreliGonderenIcin, int mesajTuru = 0)
+        // --- 📨 MESAJ GÖNDERME (GÜNCELLENDİ: ReplyId eklendi) ---
+        // Artık mesajın kime cevap olduğu (replyToId) bilgisini de alıyoruz.
+        public async Task OzelMesajGonder(string aliciAdi, string sifreliAliciIcin, string sifreliGonderenIcin, int mesajTuru = 0, string? replyToId = null)
         {
-            // Göndereni ConnectionId'den bul (EN GÜVENLİ YÖNTEM)
             var senderItem = OnlineKullanicilar.FirstOrDefault(x => x.Value == Context.ConnectionId);
             string? gonderenAdi = senderItem.Key;
 
             if (!string.IsNullOrEmpty(gonderenAdi) && !string.IsNullOrEmpty(aliciAdi))
             {
-                // 1. Veritabanına Kaydet
                 var gonderenUser = await _context.Kullanicilar.FirstOrDefaultAsync(u => u.KullaniciAdi == gonderenAdi);
                 var aliciUser = await _context.Kullanicilar.FirstOrDefaultAsync(u => u.KullaniciAdi == aliciAdi);
 
@@ -87,34 +81,70 @@ namespace ChatApp.Api.Hubs
                         AliciId = aliciUser.Id,
                         SifreliIcerikAlici = sifreliAliciIcin,
                         SifreliIcerikGonderen = sifreliGonderenIcin,
-                        MesajTuru = mesajTuru, // 0:Metin, 1:Ses, 2:Resim
+                        MesajTuru = mesajTuru,
                         GonderilmeTarihi = DateTime.UtcNow,
-                        SunucuAlisTarihi = DateTime.UtcNow
+                        SunucuAlisTarihi = DateTime.UtcNow,
+                        OkunduMu = false, // İlk başta okunmadı
+                        YanitlananMesajId = replyToId != null ? Guid.Parse(replyToId) : null // Cevap ise ID'si var
                     };
 
                     _context.Mesajlar.Add(yeniMesaj);
                     await _context.SaveChangesAsync();
-                }
 
-                // 2. Canlı Olarak Alıcıya İlet
-                if (OnlineKullanicilar.TryGetValue(aliciAdi, out string? aliciConnectionId))
-                {
-                    await Clients.Client(aliciConnectionId).SendAsync("MesajAl", gonderenAdi, sifreliAliciIcin, mesajTuru);
+                    // Alıcı Online ise Gönder
+                    if (OnlineKullanicilar.TryGetValue(aliciAdi, out string? aliciConnectionId))
+                    {
+                        // Frontend'e replyToId'yi de gönderiyoruz
+                        await Clients.Client(aliciConnectionId).SendAsync("MesajAl", gonderenAdi, sifreliAliciIcin, mesajTuru, yeniMesaj.Id, replyToId);
+                    }
                 }
             }
         }
 
-        // --- 🔥 DÜZELTİLEN YAZIYOR METODU ---
+        // --- 👀 YAZIYOR SİNYALİ ---
         public async Task Yaziyor(string aliciKullanici)
         {
-            // Göndereni Dictionary'den buluyoruz (Context.UserIdentifier yerine)
             var senderItem = OnlineKullanicilar.FirstOrDefault(x => x.Value == Context.ConnectionId);
             string? gonderen = senderItem.Key;
 
-            // Eğer gönderen biliniyorsa ve alıcı online ise sinyali gönder
             if (!string.IsNullOrEmpty(gonderen) && OnlineKullanicilar.TryGetValue(aliciKullanici, out string? aliciConnectionId))
             {
                 await Clients.Client(aliciConnectionId).SendAsync("KullaniciYaziyor", gonderen);
+            }
+        }
+
+        // --- ✅ MAVİ TİK: MESAJLARI OKUDUM SİNYALİ ---
+        public async Task MesajlariOkudum(string gonderenKullaniciAdi)
+        {
+            var okuyanItem = OnlineKullanicilar.FirstOrDefault(x => x.Value == Context.ConnectionId);
+            string? okuyanAdi = okuyanItem.Key; // Ben (Okuyan)
+
+            if (!string.IsNullOrEmpty(okuyanAdi))
+            {
+                // 1. Veritabanında güncelle: "Gonderen" kişi X olan ve "Alici" kişi Ben olan okunmamış mesajları bul
+                var okunmamisMesajlar = await _context.Mesajlar
+                    .Include(m => m.Gonderen)
+                    .Include(m => m.Alici)
+                    .Where(m => m.Gonderen.KullaniciAdi == gonderenKullaniciAdi && 
+                                m.Alici.KullaniciAdi == okuyanAdi && 
+                                !m.OkunduMu)
+                    .ToListAsync();
+
+                if (okunmamisMesajlar.Any())
+                {
+                    foreach (var mesaj in okunmamisMesajlar)
+                    {
+                        mesaj.OkunduMu = true;
+                        mesaj.OkunmaTarihi = DateTime.UtcNow;
+                    }
+                    await _context.SaveChangesAsync();
+
+                    // 2. Karşı tarafa (Mesajı atan kişiye) haber ver: "Mesajların okundu, mavi tik yap"
+                    if (OnlineKullanicilar.TryGetValue(gonderenKullaniciAdi, out string? gonderenConnId))
+                    {
+                        await Clients.Client(gonderenConnId).SendAsync("MesajlarOkundu", okuyanAdi);
+                    }
+                }
             }
         }
     }

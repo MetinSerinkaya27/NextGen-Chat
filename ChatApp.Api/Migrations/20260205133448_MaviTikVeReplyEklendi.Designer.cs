@@ -3,6 +3,7 @@ using System;
 using ChatApp.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace ChatApp.Api.Migrations
 {
     [DbContext(typeof(UygulamaDbContext))]
-    partial class UygulamaDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260205133448_MaviTikVeReplyEklendi")]
+    partial class MaviTikVeReplyEklendi
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -82,35 +85,9 @@ namespace ChatApp.Api.Migrations
                     b.Property<DateTime>("SunucuAlisTarihi")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<Guid?>("YanitlananMesajId")
-                        .HasColumnType("uuid");
-
                     b.HasKey("Id");
 
-                    b.HasIndex("AliciId");
-
-                    b.HasIndex("GonderenId");
-
                     b.ToTable("Mesajlar");
-                });
-
-            modelBuilder.Entity("ChatApp.Api.Entities.Mesaj", b =>
-                {
-                    b.HasOne("ChatApp.Api.Entities.Kullanici", "Alici")
-                        .WithMany()
-                        .HasForeignKey("AliciId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("ChatApp.Api.Entities.Kullanici", "Gonderen")
-                        .WithMany()
-                        .HasForeignKey("GonderenId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Alici");
-
-                    b.Navigation("Gonderen");
                 });
 #pragma warning restore 612, 618
         }

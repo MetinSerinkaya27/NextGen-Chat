@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useMemo } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import * as signalR from '@microsoft/signalr';
 import axios from 'axios';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -7,66 +7,30 @@ import { importPrivateKey, importPublicKey, encryptHybrid, decryptHybrid } from 
 import { blobToBase64 } from '../utils/fileHelpers'; 
 
 // --- TİPLER ---
-interface ChatProps {
-  currentUser: string;
-  onLogout: () => void;
-}
+interface ChatProps { currentUser: string; onLogout: () => void; }
+interface Message { id: string; user: string; text: string; time: string; mesajTuru: number; isRead: boolean; replyToId?: string | null; }
+interface UserFromDB { kullaniciAdi: string; sonGorulme: string | null; }
+interface MessageFromDB { id: string; gonderenKullanici: string; aliciKullanici: string; sifreliIcerik: string; tarih: string; mesajTuru: number; okunduMu: boolean; yanitlananMesajId?: string; }
 
-interface Message {
-  id: string;
-  user: string;
-  text: string;     
-  time: string;
-  mesajTuru: number; // 0: Metin, 1: Ses, 2: Resim
-}
+// --- KOMPONENTLER (Görsel Öğeler Aynı) ---
+const LiveAudioVisualizer = ({ isRecording }: { isRecording: boolean }) => (
+  <div className="flex items-center gap-[2px] h-6 mx-2">
+    {[...Array(10)].map((_, i) => (
+      <motion.div key={i} initial={{ height: 4 }} animate={isRecording ? { height: [4, Math.random() * 20 + 4, 4] } : { height: 4 }} transition={{ repeat: Infinity, duration: 0.2 + Math.random() * 0.3 }} className="w-[3px] bg-gray-500 rounded-full opacity-60" />
+    ))}
+  </div>
+);
 
-interface UserFromDB {
-  kullaniciAdi: string;
-  sonGorulme: string | null;
-}
-
-interface MessageFromDB {
-  id: string;
-  gonderenKullanici: string;
-  aliciKullanici: string;
-  sifreliIcerik: string;
-  tarih: string;
-  mesajTuru: number; 
-}
-
-// --- 📊 CANLI SES DALGASI KOMPONENTİ ---
-const LiveAudioVisualizer = ({ isRecording }: { isRecording: boolean }) => {
-  return (
-    <div className="flex items-center gap-[2px] h-6 mx-2">
-      {[...Array(15)].map((_, i) => (
-        <motion.div
-          key={i}
-          initial={{ height: 4 }}
-          animate={isRecording ? { height: [4, Math.random() * 24 + 4, 4] } : { height: 4 }}
-          transition={{ repeat: Infinity, duration: 0.2 + Math.random() * 0.3, ease: "easeInOut" }}
-          className="w-[3px] bg-gray-500 rounded-full opacity-60"
-        />
-      ))}
-    </div>
-  );
-};
-
-// --- 📷 RESİM MESAJI BİLEŞENİ ---
-const ImageMessage = ({ src, isMe }: { src: string, isMe: boolean }) => {
+const ImageMessage = ({ src }: { src: string }) => {
   const [isOpen, setIsOpen] = useState(false);
   return (
     <>
       <div onClick={() => setIsOpen(true)} className="cursor-pointer overflow-hidden rounded-lg mb-1 border border-black/5">
         <img src={src} alt="Resim" className="max-w-[240px] max-h-[300px] object-cover" />
       </div>
-      {/* Lightbox */}
       <AnimatePresence>
         {isOpen && (
-          <motion.div 
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} 
-            onClick={() => setIsOpen(false)} 
-            className="fixed inset-0 z-[100] bg-black/90 flex items-center justify-center p-4 cursor-zoom-out backdrop-blur-sm"
-          >
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsOpen(false)} className="fixed inset-0 z-[100] bg-black/90 flex items-center justify-center p-4 cursor-zoom-out backdrop-blur-sm">
              <motion.img initial={{ scale: 0.8 }} animate={{ scale: 1 }} src={src} className="max-w-full max-h-full rounded-md shadow-2xl" />
           </motion.div>
         )}
@@ -75,77 +39,43 @@ const ImageMessage = ({ src, isMe }: { src: string, isMe: boolean }) => {
   );
 };
 
-// --- 🎵 SES OYNATICI ---
 const AudioMessage = ({ src, isMe }: { src: string, isMe: boolean }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [playbackRate, setPlaybackRate] = useState(1);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-
-  const formatTime = (time: number) => {
-    if (!time || isNaN(time)) return "0:00";
-    const min = Math.floor(time / 60);
-    const sec = Math.floor(time % 60);
-    return `${min}:${sec < 10 ? "0" + sec : sec}`;
-  };
-
-  const togglePlay = () => {
-    if (!audioRef.current) return;
-    if (isPlaying) { audioRef.current.pause(); } 
-    else { audioRef.current.playbackRate = playbackRate; audioRef.current.play(); }
-    setIsPlaying(!isPlaying);
-  };
-
-  const changeSpeed = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    const newRate = playbackRate === 1 ? 1.5 : playbackRate === 1.5 ? 2 : 1;
-    setPlaybackRate(newRate);
-    if (audioRef.current) audioRef.current.playbackRate = newRate;
-  };
-
-  const handleTimeUpdate = () => {
-    if (!audioRef.current) return;
-    const current = audioRef.current.currentTime;
-    const total = audioRef.current.duration;
-    setCurrentTime(current);
-    setProgress(total ? (current / total) * 100 : 0);
-    if (current === total) { setIsPlaying(false); setProgress(0); setCurrentTime(0); }
-  };
-
-  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!audioRef.current) return;
-    const newTime = (parseFloat(e.target.value) / 100) * duration;
-    audioRef.current.currentTime = newTime;
-    setProgress(parseFloat(e.target.value));
-  };
-
+  const togglePlay = () => { if (!audioRef.current) return; isPlaying ? audioRef.current.pause() : audioRef.current.play(); setIsPlaying(!isPlaying); };
+  const handleTimeUpdate = () => { if (!audioRef.current) return; setProgress((audioRef.current.currentTime / audioRef.current.duration) * 100); if (audioRef.current.currentTime === audioRef.current.duration) { setIsPlaying(false); setProgress(0); } };
+  const formatTime = (t: number) => { if (!t) return "0:00"; const m = Math.floor(t/60), s = Math.floor(t%60); return `${m}:${s<10?"0"+s:s}`; };
   return (
-    <div className="flex items-center gap-2 min-w-[260px] select-none pr-1">
+    <div className="flex items-center gap-2 min-w-[240px] select-none pr-1">
       <audio ref={audioRef} src={src} onTimeUpdate={handleTimeUpdate} onLoadedMetadata={() => setDuration(audioRef.current?.duration || 0)} onEnded={() => setIsPlaying(false)} />
-      <button onClick={togglePlay} className="w-9 h-9 flex items-center justify-center rounded-full bg-black/5 hover:bg-black/10 transition-colors shrink-0">
-        {isPlaying ? <svg className="w-5 h-5 text-gray-600" fill="currentColor" viewBox="0 0 24 24"><path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/></svg> : <svg className="w-5 h-5 text-gray-600 ml-0.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>}
-      </button>
+      <button onClick={togglePlay} className="w-8 h-8 flex items-center justify-center rounded-full bg-black/5 hover:bg-black/10 transition-colors">{isPlaying ? "⏸" : "▶"}</button>
       <div className="flex-1 flex flex-col justify-center gap-1">
-        <input type="range" min="0" max="100" value={progress} onChange={handleSeek} className={`w-full h-1 rounded-lg appearance-none cursor-pointer ${isMe ? 'accent-[#005c4b] bg-black/10' : 'accent-[#005c4b] bg-gray-300'}`} />
-        <div className="flex justify-between text-[10px] text-gray-500 font-medium"><span>{formatTime(currentTime)}</span><span>{formatTime(duration)}</span></div>
+        <input type="range" min="0" max="100" value={progress} onChange={(e) => { if(audioRef.current) audioRef.current.currentTime = (parseFloat(e.target.value)/100)*duration; }} className={`w-full h-1 rounded-lg appearance-none cursor-pointer ${isMe ? 'accent-[#005c4b] bg-black/10' : 'accent-[#005c4b] bg-gray-300'}`} />
+        <div className="flex justify-between text-[10px] text-gray-500 font-medium"><span>{formatTime(audioRef.current?.currentTime || 0)}</span><span>{formatTime(duration)}</span></div>
       </div>
-      <button onClick={changeSpeed} className={`w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-bold transition-all shrink-0 ml-1 ${isMe ? 'bg-[#005c4b]/10 text-[#005c4b] hover:bg-[#005c4b]/20' : 'bg-gray-200 text-gray-600 hover:bg-gray-300'}`}>{playbackRate}x</button>
     </div>
   );
 };
 
 // 💬 MESAJ BALONU
-const MessageBubble = ({ msg, isMe }: { msg: Message, isMe: boolean }) => (
-  <div className={`flex ${isMe ? 'justify-end' : 'justify-start'} mb-2`}>
+const MessageBubble = ({ msg, isMe, onReply, replyMessage }: { msg: Message, isMe: boolean, onReply: (msg: Message) => void, replyMessage?: Message }) => (
+  <div className={`flex ${isMe ? 'justify-end' : 'justify-start'} mb-2 group`}>
     <div className={`relative px-2 py-1.5 max-w-[80%] sm:max-w-[60%] rounded-lg shadow-sm text-[14.2px] leading-[19px] ${isMe ? 'bg-[#d9fdd3] text-gray-900 rounded-tr-none' : 'bg-white text-gray-900 rounded-tl-none'}`}>
       {isMe ? <span className="absolute -right-2 top-0 w-0 h-0 border-[8px] border-t-[#d9fdd3] border-r-transparent border-b-transparent border-l-transparent"></span> : <span className="absolute -left-2 top-0 w-0 h-0 border-[8px] border-t-white border-l-transparent border-b-transparent border-r-transparent"></span>}
-      {msg.mesajTuru === 1 ? <AudioMessage src={msg.text} isMe={isMe} /> : msg.mesajTuru === 2 ? <ImageMessage src={msg.text} isMe={isMe} /> : <span className="px-1 pb-1 block break-words">{msg.text}</span>}
+      {replyMessage && (
+        <div className={`mb-1 p-1 rounded border-l-4 text-xs cursor-pointer ${isMe ? 'bg-[#cfe9ba] border-[#005c4b]/50' : 'bg-gray-100 border-gray-400'}`}>
+           <span className="font-bold text-[#005c4b] block mb-0.5">{replyMessage.user}</span>
+           <span className="opacity-70 line-clamp-1">{replyMessage.mesajTuru === 1 ? '🎤 Sesli Mesaj' : replyMessage.mesajTuru === 2 ? '📷 Fotoğraf' : replyMessage.text}</span>
+        </div>
+      )}
+      {msg.mesajTuru === 1 ? <AudioMessage src={msg.text} isMe={isMe} /> : msg.mesajTuru === 2 ? <ImageMessage src={msg.text} /> : <span className="px-1 pb-1 block break-words">{msg.text}</span>}
       <div className="flex justify-end items-center gap-1 mt-0.5 px-1 pb-0.5 opacity-60">
         <span className="text-[10px] min-w-fit">{msg.time}</span>
-        {isMe && <svg viewBox="0 0 16 11" width="14" height="9" className="text-[#53bdeb]" fill="currentColor"><path d="M11.15 1.1l-6.8 6.8L1.6 5.15.5 6.25l4.9 4.9 7.9-7.9-1.1-1.1z"/><path d="M15.5 1.1l-6.8 6.8-.75-.75 1.1-1.1 5.35-5.35 1.1 1.1z"/></svg>}
+        {isMe && <div className={msg.isRead ? "text-[#53bdeb]" : "text-gray-500"}><svg viewBox="0 0 16 11" width="16" height="11" fill="currentColor"><path d="M11.15 1.1l-6.8 6.8L1.6 5.15.5 6.25l4.9 4.9 7.9-7.9-1.1-1.1z"/><path d="M15.5 1.1l-6.8 6.8-.75-.75 1.1-1.1 5.35-5.35 1.1 1.1z"/></svg></div>}
       </div>
+      <button onClick={() => onReply(msg)} className={`absolute top-0 w-6 h-6 bg-gray-900/10 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity ${isMe ? '-left-8' : '-right-8'}`} title="Cevapla"><svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" className="text-gray-600"><path d="M10 9V5l-7 7 7 7v-4.1c5 0 8.5 1.6 11 5.1-1-5-4-10-11-11z"/></svg></button>
     </div>
   </div>
 );
@@ -164,6 +94,7 @@ export default function Chat({ currentUser, onLogout }: ChatProps) {
   const [inputText, setInputText] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
+  const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const selectedUserRef = useRef<string | null>(null); 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -178,9 +109,39 @@ export default function Chat({ currentUser, onLogout }: ChatProps) {
   const dragOffsetRef = useRef<number>(0);
   const isCancelledRef = useRef(false);
 
-  useEffect(() => { selectedUserRef.current = selectedUser; setIsTyping(false); }, [selectedUser]);
-  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, isTyping]);
+  // ✅ AKILLI OKUNDU BİLGİSİ (WINDOW FOCUS LOGIC)
+  useEffect(() => { 
+      selectedUserRef.current = selectedUser; 
+      setIsTyping(false); 
+      setReplyingTo(null);
 
+      // Sadece pencere açıksa ve kullanıcı seçiliyse okundu gönder
+      if(connection && selectedUser && document.visibilityState === 'visible' && document.hasFocus()) {
+          connection.invoke("MesajlariOkudum", selectedUser).catch(e => console.error(e));
+      }
+  }, [selectedUser, connection]);
+
+  // ✅ PENCERE ODAĞINI DİNLE (Sekmeye dönünce Mavi Tik yap)
+  useEffect(() => {
+    const handleFocus = () => {
+        if (connection && selectedUserRef.current) {
+            console.log("👀 Sekmeye dönüldü, mesajlar okunuyor...");
+            connection.invoke("MesajlariOkudum", selectedUserRef.current).catch(e => console.error(e));
+        }
+    };
+
+    window.addEventListener("focus", handleFocus);
+    window.addEventListener("visibilitychange", handleFocus); // Sekme değişimi için
+
+    return () => {
+        window.removeEventListener("focus", handleFocus);
+        window.removeEventListener("visibilitychange", handleFocus);
+    };
+  }, [connection]);
+
+  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, isTyping, replyingTo]);
+
+  // Init
   useEffect(() => {
     const initKeys = async () => {
       const storedKey = localStorage.getItem('myPrivateKey');
@@ -192,6 +153,7 @@ export default function Chat({ currentUser, onLogout }: ChatProps) {
 
   const fetchUsers = async () => { try { const res = await axios.get(`http://localhost:5124/api/kullanici?haricTutulan=${currentUser}`); setAllUsers(res.data); } catch {} };
 
+  // SignalR
   useEffect(() => {
     const newConn = new signalR.HubConnectionBuilder()
       .withUrl(`http://localhost:5124/chathub?username=${currentUser}`, { skipNegotiation: true, transport: signalR.HttpTransportType.WebSockets })
@@ -202,16 +164,36 @@ export default function Chat({ currentUser, onLogout }: ChatProps) {
 
   useEffect(() => {
     if (connection && myPrivateKeyObj) {
-      connection.off("MesajAl"); connection.off("KullaniciListesi"); connection.off("KullaniciYaziyor");
+      connection.off("MesajAl"); connection.off("KullaniciListesi"); connection.off("KullaniciYaziyor"); connection.off("MesajlarOkundu");
       
-      connection.on("MesajAl", async (gonderen: string, paket: string, tur: number) => {
+      connection.on("MesajAl", async (gonderen: string, paket: string, tur: number, msgId: string, replyToId: string | null) => {
         if (gonderen === selectedUserRef.current) {
           setIsTyping(false);
+          
+          // 🔥 DÜZELTME: Sadece pencereye bakıyorsak okundu gönder!
+          if (document.visibilityState === 'visible' && document.hasFocus()) {
+             connection.invoke("MesajlariOkudum", gonderen);
+          }
+
           try {
             const text = await decryptHybrid(paket, myPrivateKeyObj);
-            setMessages(p => [...p, { id: Math.random().toString(), user: gonderen, text, time: new Date().toLocaleTimeString('tr-TR', {hour:'2-digit', minute:'2-digit'}), mesajTuru: tur }]);
+            setMessages(p => [...p, { 
+                id: msgId, 
+                user: gonderen, 
+                text, 
+                time: new Date().toLocaleTimeString('tr-TR', {hour:'2-digit', minute:'2-digit'}), 
+                mesajTuru: tur,
+                isRead: true, 
+                replyToId: replyToId
+            }]);
           } catch (e) { console.error(e); }
         }
+      });
+
+      connection.on("MesajlarOkundu", (okuyanKisi: string) => {
+         if (okuyanKisi === selectedUserRef.current) {
+             setMessages(prev => prev.map(m => ({ ...m, isRead: true }))); 
+         }
       });
 
       connection.on("KullaniciYaziyor", (gonderen: string) => {
@@ -234,17 +216,15 @@ export default function Chat({ currentUser, onLogout }: ChatProps) {
       const decrypted = await Promise.all(data.map(async (m) => {
         try {
           const text = await decryptHybrid(m.sifreliIcerik, myPrivateKeyObj);
-          return { id: m.id, user: m.gonderenKullanici, text, time: new Date(m.tarih).toLocaleTimeString('tr-TR', {hour:'2-digit', minute:'2-digit'}), mesajTuru: m.mesajTuru };
-        } catch { return { id: m.id, user: m.gonderenKullanici, text: "🔒", time: "", mesajTuru: 0 }; }
+          return { id: m.id, user: m.gonderenKullanici, text, time: new Date(m.tarih).toLocaleTimeString('tr-TR', {hour:'2-digit', minute:'2-digit'}), mesajTuru: m.mesajTuru, isRead: m.okunduMu, replyToId: m.yanitlananMesajId };
+        } catch { return { id: m.id, user: m.gonderenKullanici, text: "🔒", time: "", mesajTuru: 0, isRead: false }; }
       }));
       setMessages(decrypted);
     } catch {}
   };
   useEffect(() => { if (selectedUser && myPrivateKeyObj) fetchHistory(selectedUser); }, [selectedUser, myPrivateKeyObj]);
 
-  const handleTyping = () => {
-    if (connection && selectedUser) connection.invoke("Yaziyor", selectedUser).catch(err => console.error(err));
-  };
+  const handleTyping = () => { if (connection && selectedUser) connection.invoke("Yaziyor", selectedUser).catch(err => console.error(err)); };
 
   const sendMessage = async (content: string = inputText, type: number = 0) => {
     const isValid = (type === 1 || type === 2) ? !!content : !!content.trim();
@@ -255,17 +235,16 @@ export default function Chat({ currentUser, onLogout }: ChatProps) {
       const myKey = await importPublicKey(localStorage.getItem('myPublicKey')!);
       const encReceiver = await encryptHybrid(content, targetKey);
       const encMe = await encryptHybrid(content, myKey);
-      await connection.invoke("OzelMesajGonder", selectedUser, encReceiver, encMe, type);
-      setMessages(p => [...p, { id: Math.random().toString(), user: currentUser, text: content, time: new Date().toLocaleTimeString('tr-TR', {hour:'2-digit', minute:'2-digit'}), mesajTuru: type }]);
-      if (type === 0) { setInputText(''); setShowEmojiPicker(false); }
+      const replyId = replyingTo ? replyingTo.id : null;
+      await connection.invoke("OzelMesajGonder", selectedUser, encReceiver, encMe, type, replyId);
+      setMessages(p => [...p, { id: Math.random().toString(), user: currentUser, text: content, time: new Date().toLocaleTimeString('tr-TR', {hour:'2-digit', minute:'2-digit'}), mesajTuru: type, isRead: false, replyToId: replyId }]);
+      if (type === 0) { setInputText(''); setShowEmojiPicker(false); setReplyingTo(null); }
     } catch (e) { alert("Mesaj gönderilemedi."); }
   };
 
   const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      try { const base64 = await blobToBase64(file); await sendMessage(base64, 2); } catch { alert("Resim yüklenemedi!"); }
-    }
+    if (file) { try { const base64 = await blobToBase64(file); await sendMessage(base64, 2); } catch { alert("Resim yüklenemedi!"); } }
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -340,43 +319,53 @@ export default function Chat({ currentUser, onLogout }: ChatProps) {
             </div>
 
             <div className="flex-1 overflow-y-auto p-4 sm:px-8 space-y-1 custom-scrollbar z-0">
-              {messages.map(msg => <MessageBubble key={msg.id} msg={msg} isMe={msg.user === currentUser} />)}
+              {messages.map(msg => <MessageBubble key={msg.id} msg={msg} isMe={msg.user === currentUser} onReply={setReplyingTo} replyMessage={messages.find(m => m.id === msg.replyToId)} />)}
               <div ref={messagesEndRef} />
             </div>
 
-            <div className="px-4 py-2 bg-[#f0f2f5] z-10 flex items-center gap-2 select-none">
-              <button onClick={(e) => { e.stopPropagation(); setShowEmojiPicker(!showEmojiPicker); }} className="text-gray-500 hover:text-gray-700 transition"><svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg></button>
-              
-              <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageSelect} />
-              <button onClick={() => fileInputRef.current?.click()} className="text-gray-500 hover:text-gray-700 transition transform rotate-45" title="Resim Gönder"><svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg></button>
-
+            <div className="px-4 py-2 bg-[#f0f2f5] z-10 flex flex-col justify-end select-none">
               <AnimatePresence>
-                 {showEmojiPicker && <motion.div initial={{opacity:0, scale:0.9}} animate={{opacity:1, scale:1}} exit={{opacity:0, scale:0.9}} className="absolute bottom-[70px] left-4 z-50"><EmojiPicker onEmojiClick={(e) => setInputText(p => p + e.emoji)} height={350} width={300} /></motion.div>}
+                {replyingTo && (
+                  <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }} className="mb-2 bg-white rounded-lg p-2 border-l-4 border-[#00a884] shadow-sm flex justify-between items-center relative z-20">
+                     <div className="flex-1 overflow-hidden">
+                        <span className="text-[#00a884] font-bold text-sm block">{replyingTo.user}</span>
+                        <span className="text-gray-500 text-sm line-clamp-1">{replyingTo.mesajTuru === 1 ? '🎤 Sesli Mesaj' : replyingTo.mesajTuru === 2 ? '📷 Fotoğraf' : replyingTo.text}</span>
+                     </div>
+                     <button onClick={() => setReplyingTo(null)} className="p-1 hover:bg-gray-100 rounded-full"><svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg></button>
+                  </motion.div>
+                )}
               </AnimatePresence>
 
-              <div className="flex-1 bg-white rounded-lg flex items-center py-2 px-4 shadow-sm relative overflow-hidden">
-                {!isRecording ? (
-                  <input type="text" className="w-full bg-transparent border-none outline-none text-gray-700 text-[15px]" placeholder="Bir mesaj yazın" value={inputText} onChange={e => { setInputText(e.target.value); handleTyping(); }} onKeyDown={e => e.key === 'Enter' && sendMessage()} />
+              <div className="flex items-center gap-2">
+                <button onClick={(e) => { e.stopPropagation(); setShowEmojiPicker(!showEmojiPicker); }} className="text-gray-500 hover:text-gray-700 transition"><svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg></button>
+                <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageSelect} />
+                <button onClick={() => fileInputRef.current?.click()} className="text-gray-500 hover:text-gray-700 transition transform rotate-45" title="Resim Gönder"><svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg></button>
+                <AnimatePresence>
+                   {showEmojiPicker && <motion.div initial={{opacity:0, scale:0.9}} animate={{opacity:1, scale:1}} exit={{opacity:0, scale:0.9}} className="absolute bottom-[70px] left-4 z-50"><EmojiPicker onEmojiClick={(e) => setInputText(p => p + e.emoji)} height={350} width={300} /></motion.div>}
+                </AnimatePresence>
+                <div className="flex-1 bg-white rounded-lg flex items-center py-2 px-4 shadow-sm relative overflow-hidden">
+                  {!isRecording ? (
+                    <input type="text" className="w-full bg-transparent border-none outline-none text-gray-700 text-[15px]" placeholder="Bir mesaj yazın" value={inputText} onChange={e => { setInputText(e.target.value); handleTyping(); }} onKeyDown={e => e.key === 'Enter' && sendMessage()} />
+                  ) : (
+                    <div className="w-full flex items-center justify-between">
+                       <div className="flex items-center gap-2" style={{ opacity: Math.max(0, 1 + dragOffset / 100) }}>
+                          <svg className="w-3 h-3 text-red-500 animate-pulse fill-current" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/></svg>
+                          <span className="font-mono text-gray-800 mr-2">{formatDuration(recordingDuration)}</span>
+                          <LiveAudioVisualizer isRecording={isRecording} />
+                       </div>
+                       <div className="text-xs text-gray-400 flex items-center gap-1" style={{ opacity: Math.max(0, 1 + dragOffset / 100) }}><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg> iptal için kaydır</div>
+                       {dragOffset < -100 && <div className="absolute inset-0 bg-white flex items-center justify-center text-red-500 font-bold animate-pulse gap-2"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg> Bırak ve İptal Et</div>}
+                    </div>
+                  )}
+                </div>
+                {inputText.trim() && !isRecording ? (
+                  <button onClick={() => sendMessage()} className="p-2 text-[#00a884] hover:text-[#008f6f] transition"><svg className="w-7 h-7" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"></path></svg></button>
                 ) : (
-                  <div className="w-full flex items-center justify-between">
-                     <div className="flex items-center gap-2" style={{ opacity: Math.max(0, 1 + dragOffset / 100) }}>
-                        <svg className="w-3 h-3 text-red-500 animate-pulse fill-current" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/></svg>
-                        <span className="font-mono text-gray-800 mr-2">{formatDuration(recordingDuration)}</span>
-                        <LiveAudioVisualizer isRecording={isRecording} />
-                     </div>
-                     <div className="text-xs text-gray-400 flex items-center gap-1" style={{ opacity: Math.max(0, 1 + dragOffset / 100) }}><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg> iptal için kaydır</div>
-                     {dragOffset < -100 && <div className="absolute inset-0 bg-white flex items-center justify-center text-red-500 font-bold animate-pulse gap-2"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg> Bırak ve İptal Et</div>}
+                  <div onMouseDown={handleMouseDown} style={{ transform: `translateX(${dragOffset}px)` }} className={`p-2 cursor-pointer transition-colors ${isRecording ? 'text-red-500' : 'text-gray-500 hover:text-gray-700'}`}>
+                     {isRecording && dragOffset < -100 ? <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg> : <svg className="w-6 h-6" viewBox="0 0 24 24" fill="currentColor"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.66 9 5v6c0 1.66 1.34 3 3 3z"/><path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>}
                   </div>
                 )}
               </div>
-
-              {inputText.trim() && !isRecording ? (
-                <button onClick={() => sendMessage()} className="p-2 text-[#00a884] hover:text-[#008f6f] transition"><svg className="w-7 h-7" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"></path></svg></button>
-              ) : (
-                <div onMouseDown={handleMouseDown} style={{ transform: `translateX(${dragOffset}px)` }} className={`p-2 cursor-pointer transition-colors ${isRecording ? 'text-red-500' : 'text-gray-500 hover:text-gray-700'}`}>
-                   {isRecording && dragOffset < -100 ? <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg> : <svg className="w-6 h-6" viewBox="0 0 24 24" fill="currentColor"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.66 9 5v6c0 1.66 1.34 3 3 3z"/><path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>}
-                </div>
-              )}
             </div>
           </>
         ) : (
