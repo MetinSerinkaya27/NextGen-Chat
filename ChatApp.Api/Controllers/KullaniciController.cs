@@ -43,21 +43,19 @@ public class KullaniciController : ControllerBase
         });
     }
 
-    // 3. REHBERİ GETİR (EKSİK OLAN KISIM BUYDU! 🚨)
-    // Adres: GET /api/kullanici?haricTutulan=metin
+    // 3. REHBERİ GETİR
     [HttpGet] 
     public async Task<IActionResult> TumKullanicilar(string haricTutulan)
     {
         var kullanicilar = await _veritabanı.Kullanicilar
             .Where(k => k.KullaniciAdi != haricTutulan) // Kendini getirme
-            .Select(k => new { k.KullaniciAdi }) // Sadece isimleri al
+            .Select(k => new { k.KullaniciAdi, k.SonGorulme }) // SonGorulme'yi de ekledim, lazım olabilir
             .ToListAsync();
 
         return Ok(kullanicilar);
     }
 
-    // 4. PUBLIC KEY GETİR (Şifreleme için)
-    // Adres: GET /api/kullanici/publickey/ali
+    // 4. PUBLIC KEY GETİR
     [HttpGet("publickey/{kullaniciAdi}")]
     public async Task<IActionResult> PublicKeyGetir(string kullaniciAdi)
     {
@@ -69,13 +67,22 @@ public class KullaniciController : ControllerBase
         return Ok(new { publicKey = kullanici.PublicKey });
     }
     
+    // 5. ☢️ TAM SIFIRLAMA (GÜNCELLENDİ)
+    // Adres: /api/kullanici/sifirla
     [HttpGet("sifirla")] 
     public async Task<IActionResult> VeritabaniSifirla()
     {
-        var herkes = await _veritabanı.Kullanicilar.ToListAsync();
-        _veritabanı.Kullanicilar.RemoveRange(herkes);
+        // Önce MESAJLARI sil (Çocuk tablo)
+        // Eğer bunu yapmazsan "Kullanıcı silinemez çünkü mesajları var" hatası alırsın.
+        var tumMesajlar = await _veritabanı.Mesajlar.ToListAsync();
+        _veritabanı.Mesajlar.RemoveRange(tumMesajlar);
+
+        // Sonra KULLANICILARI sil (Ana tablo)
+        var tumKullanicilar = await _veritabanı.Kullanicilar.ToListAsync();
+        _veritabanı.Kullanicilar.RemoveRange(tumKullanicilar);
+        
         await _veritabanı.SaveChangesAsync();
 
-        return Ok("✅ Veritabanı BAŞARIYLA SIFIRLANDI! Her şey silindi.");
+        return Ok(new { mesaj = "☢️ SİSTEM SIFIRLANDI: Tüm Mesajlar ve Kullanıcılar silindi. Yeni anahtarlarla başlayabilirsiniz." });
     }
-}           
+}

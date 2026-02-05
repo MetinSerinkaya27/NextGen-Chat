@@ -9,6 +9,7 @@ namespace ChatApp.Api.Controllers
     [ApiController]
     public class MesajlarController : ControllerBase
     {
+        // Senin projendeki DbContext adını korudum (UygulamaDbContext)
         private readonly UygulamaDbContext _context;
 
         public MesajlarController(UygulamaDbContext context)
@@ -23,6 +24,10 @@ namespace ChatApp.Api.Controllers
             public string AliciKullanici { get; set; }
             public string SifreliIcerik { get; set; }
             public DateTime Tarih { get; set; }
+            
+            // --- YENİ EKLENEN ALAN ---
+            // 0: Yazı, 1: Ses
+            public int MesajTuru { get; set; } 
         }
 
         [HttpGet("gecmis")]
@@ -53,7 +58,10 @@ namespace ChatApp.Api.Controllers
                     GonderenKullanici = m.GonderenId == user1.Id ? user1.KullaniciAdi : user2.KullaniciAdi,
                     AliciKullanici = m.AliciId == user1.Id ? user1.KullaniciAdi : user2.KullaniciAdi,
                     SifreliIcerik = dogruIcerik, 
-                    Tarih = m.GonderilmeTarihi
+                    Tarih = m.GonderilmeTarihi,
+                    
+                    // --- YENİ: Veritabanındaki türü DTO'ya aktar ---
+                    MesajTuru = m.MesajTuru
                 };
             });
 

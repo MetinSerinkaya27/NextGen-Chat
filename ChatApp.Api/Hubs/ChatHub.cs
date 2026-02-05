@@ -57,41 +57,50 @@ namespace ChatApp.Api.Hubs
             await base.OnDisconnectedAsync(exception);
         }
 
-        // --- GÜNCELLENEN KISIM: İKİ ŞİFRELİ METİN ALIYOR ---
-        public async Task OzelMesajGonder(string aliciAdi, string sifreliAliciIcin, string sifreliGonderenIcin)
+        // Parametreye 'int mesajTuru' ekledik. Frontend bize bunu yollayacak.
+public async Task OzelMesajGonder(string aliciAdi, string sifreliAliciIcin, string sifreliGonderenIcin, int mesajTuru = 0)
+{
+    var senderItem = OnlineKullanicilar.FirstOrDefault(x => x.Value == Context.ConnectionId);
+    string? gonderenAdi = senderItem.Key;
+
+    if (!string.IsNullOrEmpty(gonderenAdi) && !string.IsNullOrEmpty(aliciAdi))
+    {
+        // ... (Kullanıcı bulma kodları aynı, buraları elleme) ...
+        var gonderenUser = await _context.Kullanicilar.FirstOrDefaultAsync(u => u.KullaniciAdi == gonderenAdi);
+        var aliciUser = await _context.Kullanicilar.FirstOrDefaultAsync(u => u.KullaniciAdi == aliciAdi);
+
+        if (gonderenUser != null && aliciUser != null)
         {
-            var senderItem = OnlineKullanicilar.FirstOrDefault(x => x.Value == Context.ConnectionId);
-            string? gonderenAdi = senderItem.Key;
-
-            if (!string.IsNullOrEmpty(gonderenAdi) && !string.IsNullOrEmpty(aliciAdi))
+            var yeniMesaj = new Mesaj
             {
-                var gonderenUser = await _context.Kullanicilar.FirstOrDefaultAsync(u => u.KullaniciAdi == gonderenAdi);
-                var aliciUser = await _context.Kullanicilar.FirstOrDefaultAsync(u => u.KullaniciAdi == aliciAdi);
+                Id = Guid.NewGuid(),
+                GonderenId = gonderenUser.Id,
+                AliciId = aliciUser.Id,
+                SifreliIcerikAlici = sifreliAliciIcin,
+                SifreliIcerikGonderen = sifreliGonderenIcin,
+                
+                // --- YENİ KISIM ---
+                // Frontend'den gelen tür bilgisini veritabanına yazıyoruz.
+                // Böylece geçmişi çekerken "Bu ses miydi yazı mıydı?" diye şaşırmayız.
+                MesajTuru = mesajTuru, 
+                // -----------------
 
-                if (gonderenUser != null && aliciUser != null)
-                {
-                    // VERİTABANINA ÇİFT KOPYA KAYDET
-                    var yeniMesaj = new Mesaj
-                    {
-                        Id = Guid.NewGuid(),
-                        GonderenId = gonderenUser.Id,
-                        AliciId = aliciUser.Id,
-                        SifreliIcerikAlici = sifreliAliciIcin,       // Alıcı için olan
-                        SifreliIcerikGonderen = sifreliGonderenIcin, // Gönderen için olan
-                        GonderilmeTarihi = DateTime.UtcNow,
-                        SunucuAlisTarihi = DateTime.UtcNow
-                    };
+                GonderilmeTarihi = DateTime.UtcNow,
+                SunucuAlisTarihi = DateTime.UtcNow
+            };
 
-                    _context.Mesajlar.Add(yeniMesaj);
-                    await _context.SaveChangesAsync();
-                }
-
-                // ALICIYA SADECE ONUN AÇABİLECEĞİNİ YOLLA
-                if (OnlineKullanicilar.TryGetValue(aliciAdi, out string? aliciConnectionId))
-                {
-                    await Clients.Client(aliciConnectionId).SendAsync("MesajAl", gonderenAdi, sifreliAliciIcin);
-                }
-            }
+            _context.Mesajlar.Add(yeniMesaj);
+            await _context.SaveChangesAsync();
         }
+
+        // --- CANLI GÖNDERİM ---
+        if (OnlineKullanicilar.TryGetValue(aliciAdi, out string? aliciConnectionId))
+        {
+            // Alıcıya da haber veriyoruz: "Sana mesaj geldi, türü de şudur"
+            // (Buradaki sıralama Frontend'deki .on("MesajAl") ile AYNI olmalı!)
+            await Clients.Client(aliciConnectionId).SendAsync("MesajAl", gonderenAdi, sifreliAliciIcin, mesajTuru);
+        }
+    }
+}
     }
 }
